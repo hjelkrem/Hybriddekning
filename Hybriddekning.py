@@ -402,12 +402,12 @@ class Hybriddekning:
                 if len(skipantenna_ids)==len(antcells):
                     self.dprint("No antennae visible in canvas!")
                 else:
-                    minx=min(roadpoints, key = lambda t: t[1])[0]-500
-                    miny=min(roadpoints, key = lambda t: t[0])[1]-500
-                    maxx=max(roadpoints, key = lambda t: t[1])[0]+500
-                    maxy=max(roadpoints, key = lambda t: t[0])[1]+500
-                    cols2=maxy-miny
-                    rows2=maxx-minx
+                    minx = min(roadpoints, key=lambda t: t[0])[0] - 500
+                    miny = min(roadpoints, key=lambda t: t[1])[1] - 500
+                    maxx = max(roadpoints, key=lambda t: t[0])[0] + 500
+                    maxy = max(roadpoints, key=lambda t: t[1])[1] + 500
+                    rows2=maxy-miny
+                    cols2=maxx-minx
                     filearray = [ [0]*cols2 for _ in xrange(rows2) ]
                     
                     for roadpoint in roadpoints:
