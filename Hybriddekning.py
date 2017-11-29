@@ -39,6 +39,8 @@ from qgis.core import *
 import time
 from path_loss_diffraction import *
 import os
+from datetime import datetime
+from datetime import timedelta
 
 class Hybriddekning:
     """QGIS Plugin Implementation."""
@@ -76,6 +78,9 @@ class Hybriddekning:
         # TODO: We are going to let the user set this up in a future iteration
         self.toolbar = self.iface.addToolBar(u'Hybriddekning')
         self.toolbar.setObjectName(u'Hybriddekning')
+
+        self.lastTiming = None
+        self.timingLog = ""
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -325,6 +330,9 @@ class Hybriddekning:
                 self.dprint("Using layer: {0} for antennas".format(lyr.name()))
                 antennaLayer=lyr
                 foundantenna=True
+
+        self.timeit("Starting calculations ...", True)
+
         ext = iface.mapCanvas().extent()
         xmin = ext.xMinimum()
         xmax = ext.xMaximum()
@@ -409,6 +417,8 @@ class Hybriddekning:
                     rows2=maxy-miny
                     cols2=maxx-minx
                     filearray = [ [0]*cols2 for _ in xrange(rows2) ]
+
+                    self.timeit("Roadlink setup")
                     
                     for roadpoint in roadpoints:
                         celle=roadpoint
@@ -439,6 +449,9 @@ class Hybriddekning:
                             counter+=1
                         if len(signals)>0:
                             filearray[int(celle[1]-miny)][int(celle[0]-minx)]=min(signals)
+                    
+                    self.timeit("Calculations")
+
                     resultarray = np.array(filearray)
                     if len(txtPath)>0:
                         tempfilename=txtPath
@@ -450,7 +463,10 @@ class Hybriddekning:
                     layer.loadNamedStyle(uri)
                     QgsMapLayerRegistry.instance().addMapLayer(layer,False)
                     #iface.messageBar().clearWidgets() 
-                    self.dprint("Calculations complete")
+
+                    self.timeit("Complete")
+
+                    self.dprint("Calculations complete\n\n" + self.timingLog)
             else:
                 self.dprint("No roadlinks selected")
             
