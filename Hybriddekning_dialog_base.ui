@@ -92,6 +92,14 @@
      <string>Plot height profile </string>
     </property>
    </widget>
+   <widget class="QRadioButton" name="rb_testCalcSignal">
+    <property name="text">
+     <string>Test</string>
+    </property>
+    <property name="checked">
+     <bool>true</bool>
+    </property>
+   </widget>
   </widget>
  </widget>
  <resources/>

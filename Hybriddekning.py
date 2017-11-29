@@ -28,6 +28,7 @@ from PyQt4.QtGui import QAction, QIcon, QMessageBox, QDateEdit, QColor, QFileDia
 import resources
 # Import the code for the dialog
 from Hybriddekning_dialog import HybriddekningDialog
+from antenna import Antenna
 import os.path
 from osgeo import osr, gdal, ogr
 from qgis.gui import QgsMessageBar
@@ -473,6 +474,202 @@ class Hybriddekning:
         else:
             self.dprint("Not sufficient layers for calculations")
                     #iface.messageBar().pushMessage("Output", str(originX), level=QgsMessageBar.INFO)
+
+    def timeit(self, message, reset=False):
+        
+        if self.lastTiming is None or reset:
+            self.lastTiming = datetime.now()
+
+        if reset:
+            self.timingLog += message + "\n"
+        else:
+            delta = datetime.now() - self.lastTiming
+            self.timingLog += "    " + message + ": " + str(delta.total_seconds() * 1000) + "\n"
+
+    def calculateSignal_mt(self):
+
+        #Extract the names of all checked layers
+        checkednames = [x.name() for x in iface.mapCanvas().layers()]
+
+        #Extract all layers that have names matching the checked layers
+        layers = [x for x in QgsMapLayerRegistry.instance().mapLayers().values() if x.name() in checkednames]
+
+        #Enumerate all layers and pick the layers to use
+        for lyr in layers:
+            if type(lyr) is QgsRasterLayer:
+                rasterfile = lyr
+            if type(lyr) is QgsVectorLayer and lyr.geometryType() == 1: #lyr.geometryType() #0=points, 1=line, 2=polygon
+                roadLayer = lyr
+            if type(lyr) is QgsVectorLayer and lyr.geometryType() == 0:
+                antennaLayer = lyr
+        
+        #If we didn't find the required layers, exit immediately.
+        if rasterfile is None or roadLayer is None or antennaLayer is None:
+            self.dprint("Not sufficient layers for calculations")
+            return
+
+        #If no road links are selected, exit immediately
+        selectedRoadLinks = roadLayer.selectedFeatures()
+        if len(selectedRoadLinks) <= 0:
+            self.dprint("No roadlinks selected")
+            return
+
+        #Let the user know which layers have been selected
+        self.dprint("Selected layers:\r\n - Terrain: {0}\r\n - Antennas: {1}\r\n - Road network: {2}".format(rasterfile.name(), antennaLayer.name(), roadLayer.name()))
+        
+        self.timeit("Starting new calculations ...", True)
+
+        ext = iface.mapCanvas().extent()
+        xmin = ext.xMinimum()
+        xmax = ext.xMaximum()
+        ymin = ext.yMinimum()
+        ymax = ext.yMaximum()
+
+        coords = "%f,%f,%f,%f" %(xmin, xmax, ymin, ymax)  
+
+        raster = gdal.Open(rasterfile.source())
+        band = raster.GetRasterBand(1)
+        geotransform = raster.GetGeoTransform()
+        data = band.ReadAsArray(0, 0, raster.RasterXSize, raster.RasterYSize)
+
+        start_point = QgsPoint(xmin, ymax)
+        end_point = QgsPoint(xmax, ymin)
+        startcella = self.findcell(start_point, geotransform)
+        sluttcella = self.findcell(end_point, geotransform)
+
+        antennas = Antenna.fromFeatures(antennaLayer.getFeatures())
+        validAntennas = []
+
+        for ant in antennas:
+            ant.qgisPoint = self.findcell(ant.point, geotransform)
+            if ant.qgisPoint[0] > startcella[0] and ant.qgisPoint[0] < sluttcella[0] and ant.qgisPoint[1] > startcella[1] and ant.qgisPoint[1] < sluttcella[1]:
+                validAntennas.append(ant)
+
+        #If no valid antennas remain, exit immediately.
+        if len(validAntennas) <= 0:
+            self.dprint("No antennae visible in canvas!")
+            return   
+
+        roadpoints = []
+
+        #Using a dictionary to store which coordinates have been added to the list.
+        #This gives a slight additional memory overhead, but a huge performance boost,
+        #as the dictionary checks are O(1).
+        roadDict = {}
+
+        def addRoadPoints(sx, sy, radius):
+            for x in range(sx - radius, sx + radius):
+                for y in range(sy - radius, sy + radius):
+
+                    #Check if this coordinate has been added before, and add it if not.
+                    isNew = False
+                    if x not in roadDict:
+                        newY = {}
+                        newY[y] = 1
+                        roadDict[x] = newY
+                        isNew = True
+                    elif y not in roadDict[x]:
+                        roadDict[x][y] = 1
+                        isNew = True
+
+                    if isNew:
+                        roadpoints.append((x, y))
+
+        for link in selectedRoadLinks:
+            geom = link.geometry().asPolyline()
+            startcelle = self.findcell(QgsPoint(geom[0]), geotransform)
+
+            #Find the nearest points
+            addRoadPoints(startcelle[0], startcelle[1], 5)
+
+            for i in range(1, len(geom)):
+                sluttcelle = self.findcell(QgsPoint(geom[i]), geotransform)
+                cells = self.get_cells_Bresenham(startcelle, sluttcelle)
+                for cell in cells:
+                    addRoadPoints(cell[0], cell[1], 10)
+
+                startcelle = sluttcelle
+        
+        minx = min(roadpoints, key=lambda t: t[0])[0] - 500
+        miny = min(roadpoints, key=lambda t: t[1])[1] - 500
+        maxx = max(roadpoints, key=lambda t: t[0])[0] + 500
+        maxy = max(roadpoints, key=lambda t: t[1])[1] + 500
+        rows = maxy - miny
+        cols = maxx - minx
+        filearray = [ [0]*cols for _ in xrange(rows) ]
+
+        self.timeit("Roadlink setup")
+
+        timings = {
+            "init": 0,
+            "points": 0,
+            "signals": 0
+        }
+        
+        for celle in roadpoints:
+            signals = []
+            for ant in validAntennas:
+                #Parallelliser:
+
+                start = datetime.now()
+
+                points = self.get_cells_Bresenham(celle, ant.qgisPoint)
+                length = np.sqrt((celle[0] - ant.qgisPoint[0])**2 + (celle[1] - ant.qgisPoint[1])**2)
+                std_dist = length / len(points)
+                heights = []
+                dists = []
+                dist = 0.0
+
+                timings["init"] += (datetime.now() - start).total_seconds() * 1000
+                start = datetime.now()
+                
+                for point in points:
+                    height = data[point[1]][point[0]]
+                    heights.append(height)
+                    dists.append(dist)
+                    dist += std_dist
+
+                timings["points"] += (datetime.now() - start).total_seconds() * 1000
+                start = datetime.now()
+
+                #Parallelliser:
+                calc_signal = self.calculate_propagation(dists, heights, ant.frequencyHz, ant.height)
+                if calc_signal > 0:
+                    signals.append(calc_signal)
+
+                timings["signals"] += (datetime.now() - start).total_seconds() * 1000
+                start = datetime.now()
+
+            if len(signals) > 0:
+                filearray[int(celle[1]-miny)][int(celle[0]-minx)] = min(signals)
+
+        self.timingLog += str(timings) + "\n"
+
+        self.timeit("Calculations")
+
+        resultarray = np.array(filearray)
+
+        temp_path = os.environ['TEMP']
+        tempfilename=temp_path+'temp'
+        driver = gdal.GetDriverByName('GTiff')
+        dataset = driver.Create(tempfilename,100,100,1,gdal.GDT_Float32)   
+
+        txtPath = self.dlg.txtDem.toPlainText()
+        if len(txtPath) > 0:
+            tempfilename = txtPath
+
+        SRID = int(str(iface.activeLayer().crs().authid()).split(":")[1])
+        self.array2raster(tempfilename,cols,rows,geotransform,resultarray,SRID,miny,minx)
+        layer = QgsRasterLayer(tempfilename, 'resultat')
+        # Add the layer to the map (comment the following line if the loading in the Layers Panel is not needed)
+        iface.addRasterLayer(tempfilename, 'resultat')
+        uri = str(os.path.dirname(os.path.realpath(__file__)))+"\defaultstyle.qml"
+        layer.loadNamedStyle(uri)
+        QgsMapLayerRegistry.instance().addMapLayer(layer,False)
+
+        self.timeit("Done")
+
+        self.dprint("Calculations complete\n\n" + self.timingLog)
   
 
     def optimize(self):
@@ -645,8 +842,10 @@ class Hybriddekning:
             elif self.dlg.radioButton_2.isChecked():
                 self.calculateSignal()
 
+            elif self.dlg.rb_testCalcSignal.isChecked():
+                self.calculateSignal_mt()
+
             elif self.dlg.radioButton_3.isChecked():
-                #Optimize
                 self.optimize()
             else:
                 self.dprint("Please choose an option.")
@@ -697,14 +896,15 @@ class Hybriddekning:
         outRasterSRS.ImportFromEPSG(SRID)
         outRaster.SetProjection(outRasterSRS.ExportToWkt())
         outband.FlushCache()
-    def findcell(self, point,geotransform):
+
+    def findcell(self, point, geotransform):
         originX = geotransform[0]
         originY = geotransform[3]
         pixelWidth = geotransform[1]
         pixelHeight = geotransform[5]
         startxOffset = int((point[0] - originX)/pixelWidth)
         startyOffset = int((point[1] - originY)/pixelHeight)
-        start=(startxOffset,startyOffset)
+        start = (startxOffset, startyOffset)
         return start
         
     def writeToFile(self,filestring,txtPath,writeFile):
