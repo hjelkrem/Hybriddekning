@@ -319,180 +319,6 @@ class Hybriddekning:
         else:
             self.dprint("Not sufficient layers for calculations")
 
-
-    def calculateSignal(self):
-        txtPath = self.dlg.txtDem.toPlainText()
-        foundraster=False
-        foundantenna=False
-        foundroad=False
-        layernim = iface.activeLayer().name()
-        checkednames=[]
-        checkedlayers=iface.mapCanvas().layers()
-        for checklayer in checkedlayers:
-            checkednames.append(checklayer.name())
-        for lyr in QgsMapLayerRegistry.instance().mapLayers().values():
-            if type(lyr) is QgsRasterLayer and lyr.name() in checkednames:
-                self.dprint("Using layer: {0} for terrain".format(lyr.name()))
-                rasterfile=lyr
-                rasterfilename=lyr.source()
-                foundraster=True
-            if type(lyr) is QgsVectorLayer and lyr.geometryType()==1 and lyr.name() in checkednames:
-                #lyr.geometryType() #0=points, 1=line, 2=polygon
-                self.dprint("Using layer: {0} for road network".format(lyr.name()))
-                roadlayer=lyr
-                foundroad=True
-            if type(lyr) is QgsVectorLayer and lyr.geometryType()==0 and lyr.name() in checkednames:
-
-                self.dprint("Using layer: {0} for antennas".format(lyr.name()))
-                antennaLayer=lyr
-                foundantenna=True
-
-        self.timeit("Starting calculations ...", True)
-
-        ext = iface.mapCanvas().extent()
-        xmin = ext.xMinimum()
-        xmax = ext.xMaximum()
-        ymin = ext.yMinimum()
-        ymax = ext.yMaximum()
-        coords = "%f,%f,%f,%f" %(xmin, xmax, ymin, ymax)  
-        if foundantenna and foundraster and foundroad:
-            ant_ids=[]
-            ant_frequencys=[]
-            ant_height=[]
-            for feature in antennaLayer.getFeatures():
-                attrs = feature.attributes()
-                ant_ids.append(attrs[0])
-                ant_frequencys.append(attrs[1])
-                ant_height.append([2])
-            ants=[]
-            iter = antennaLayer.getFeatures()
-            for feature in iter:
-                ants.append(feature.geometry().asPoint())
-            temp_path = os.environ['TEMP']
-            tempfilename=temp_path+'temp'
-            driver = gdal.GetDriverByName('GTiff')
-            dataset = driver.Create(tempfilename,100,100,1,gdal.GDT_Float32)      
-            raster = gdal.Open(rasterfilename)
-            cols = raster.RasterXSize
-            rows = raster.RasterYSize
-            bands = raster.RasterCount
-            band = raster.GetRasterBand(1)
-            geotransform = raster.GetGeoTransform()
-            data = band.ReadAsArray(0, 0, cols, rows)
-            SRID=int(str(iface.activeLayer().crs().authid()).split(":")[1])
-            start_point=QgsPoint(xmin,ymax)
-            ident = rasterfile.dataProvider().identify(QgsPoint(xmin,ymax), QgsRaster.IdentifyFormatValue)
-            startcella=self.findcell(start_point,geotransform)
-            end_point=QgsPoint(xmax,ymin)
-            sluttcella=self.findcell(end_point,geotransform)
-            sel_features = roadlayer.selectedFeatures()
-
-            self.timeit("Init")
-
-            if len(sel_features)>0:
-                roadpoints=[]
-                for f in sel_features:
-                    geom = f.geometry().asPolyline()
-                    start_point = QgsPoint(geom[0])
-                    startcelle=self.findcell(start_point,geotransform)
-                    #Finn de nærmeste punkter:
-                    for x in range(startcelle[0]-5,startcelle[0]+5):
-                        for y in range(startcelle[1]-5,startcelle[1]+5):
-                            celle=(x,y)
-                            if celle not in roadpoints:
-                    #if startcelle not in roadpoints:
-                                roadpoints.append(celle)
-                    for i in range(1,len(geom)):
-                        end_point = QgsPoint(geom[i])
-                        sluttcelle=self.findcell(end_point,geotransform)
-                        if sluttcelle!=startcelle:
-                            cell_array=self.get_cells_Bresenham(startcelle,sluttcelle)
-                            for cell in cell_array:
-                                for x in range(cell[0]-10,cell[0]+10):
-                                    for y in range(cell[1]-10,cell[1]+10):
-                                        celle=(x,y)
-                                        if celle not in roadpoints:                                
-                                #if cell not in roadpoints:
-                                            roadpoints.append(celle)
-                            startcelle=sluttcelle
-                antcells=[]
-                antpointcounter=0
-                skipantenna_ids=[]
-                for ant in ants:
-                    ant_id=ant_ids[antpointcounter]
-                    antpointcounter+=1
-                    antennecelle=self.findcell(ant,geotransform)
-                    antcells.append(antennecelle)
-                    #self.dprint(str(antennecelle)+str(coords))
-                    if antennecelle[0]<startcella[0] or antennecelle[0]>sluttcella[0] or antennecelle[1]<startcella[1] or antennecelle[1]>sluttcella[1]:
-                        skipantenna_ids.append(antpointcounter)
-                if len(skipantenna_ids)==len(antcells):
-                    self.dprint("No antennae visible in canvas!")
-                else:
-                    minx = min(roadpoints, key=lambda t: t[0])[0] - 500
-                    miny = min(roadpoints, key=lambda t: t[1])[1] - 500
-                    maxx = max(roadpoints, key=lambda t: t[0])[0] + 500
-                    maxy = max(roadpoints, key=lambda t: t[1])[1] + 500
-                    rows2=maxy-miny
-                    cols2=maxx-minx
-                    filearray = [ [0]*cols2 for _ in xrange(rows2) ]
-
-                    self.timeit("Roadlink setup")
-                    
-                    for roadpoint in roadpoints:
-                        celle=roadpoint
-                        signals=[]
-                        counter=0
-                        for antennecelle in antcells:
-                            if counter not in skipantenna_ids:
-                                #Parallelliser:
-                                #f=5900e6
-                                f=ant_frequencys[counter]*1000000 #Conv from MHz to Hz
-                                ant_h=ant_height[counter]
-                                points=self.get_cells_Bresenham(celle,antennecelle)
-                                no_points=len(points)
-                                length=np.sqrt((celle[0]-antennecelle[0])**2 + (celle[1]-antennecelle[1])**2)
-                                std_dist=length/no_points
-                                heights=[]
-                                dists=[]
-                                dist=0.0
-                                for point in points:
-                                    height=data[point[1]][point[0]]
-                                    heights.append(height)
-                                    dists.append(dist)
-                                    dist+=std_dist
-                                #Parallelliser:
-                                calc_signal=self.calculate_propagation(dists,heights,f,ant_h)
-                                if calc_signal>0:
-                                    signals.append(calc_signal)
-                            counter+=1
-                        if len(signals)>0:
-                            filearray[int(celle[1]-miny)][int(celle[0]-minx)]=min(signals)
-                    
-                    self.timeit("Calculations")
-
-                    resultarray = np.array(filearray)
-                    if len(txtPath)>0:
-                        tempfilename=txtPath
-                    self.array2raster(tempfilename,cols2,rows2,geotransform,resultarray,SRID,miny,minx)
-                    layer = QgsRasterLayer(tempfilename, 'resultat')
-                    # Add the layer to the map (comment the following line if the loading in the Layers Panel is not needed)
-                    iface.addRasterLayer(tempfilename, 'resultat')
-                    uri = str(os.path.dirname(os.path.realpath(__file__)))+"\defaultstyle.qml"
-                    layer.loadNamedStyle(uri)
-                    QgsMapLayerRegistry.instance().addMapLayer(layer,False)
-                    #iface.messageBar().clearWidgets() 
-
-                    self.timeit("Complete")
-
-                    self.dprint("Calculations complete\n\n" + self.timingLog)
-            else:
-                self.dprint("No roadlinks selected")
-            
-        else:
-            self.dprint("Not sufficient layers for calculations")
-                    #iface.messageBar().pushMessage("Output", str(originX), level=QgsMessageBar.INFO)
-
     def timeit(self, message, reset=False):
         
         if self.lastTiming is None or reset:
@@ -503,8 +329,6 @@ class Hybriddekning:
         else:
             delta = datetime.now() - self.lastTiming
             self.timingLog += "    " + message + ": " + str(delta.total_seconds() * 1000) + "\n"
-
-    def calculateSignal_mt(self):
 
         #Extract the names of all checked layers
         checkednames = [x.name() for x in iface.mapCanvas().layers()]
@@ -520,6 +344,8 @@ class Hybriddekning:
                 roadLayer = lyr
             if type(lyr) is QgsVectorLayer and lyr.geometryType() == 0:
                 antennaLayer = lyr
+    def calculateSignal(self):
+
         
         #If we didn't find the required layers, exit immediately.
         if rasterfile is None or roadLayer is None or antennaLayer is None:
