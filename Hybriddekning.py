@@ -29,6 +29,7 @@ import resources
 # Import the code for the dialog
 from Hybriddekning_dialog import HybriddekningDialog
 from antenna import Antenna
+from timing import Timing
 import os.path
 from osgeo import osr, gdal, ogr
 from qgis.gui import QgsMessageBar
@@ -385,6 +386,9 @@ class Hybriddekning:
             end_point=QgsPoint(xmax,ymin)
             sluttcella=self.findcell(end_point,geotransform)
             sel_features = roadlayer.selectedFeatures()
+
+            self.timeit("Init")
+
             if len(sel_features)>0:
                 roadpoints=[]
                 for f in sel_features:
@@ -571,6 +575,8 @@ class Hybriddekning:
         #as the dictionary checks are O(1).
         roadDict = {}
 
+        self.timeit("Init")
+
         def addRoadPoints(sx, sy, radius):
             for x in range(sx - radius, sx + radius):
                 for y in range(sy - radius, sy + radius):
@@ -614,26 +620,14 @@ class Hybriddekning:
 
         self.timeit("Roadlink setup")
 
-        timings = {
-            "init": 0,
-            "points": 0,
-            "signals": 0
-        }
-        
         for celle in roadpoints:
             minSignal = 999999
             for ant in validAntennas:
-                #Parallelliser:
-
-                start = datetime.now()
 
                 points = self.get_cells_Bresenham(celle, ant.qgisPoint)
                 length = np.sqrt((celle[0] - ant.qgisPoint[0])**2 + (celle[1] - ant.qgisPoint[1])**2)
                 std_dist = length / len(points)
                 dist = 0.0
-
-                timings["init"] += (datetime.now() - start).total_seconds() * 1000
-                start = datetime.now()
                 
                 for point in points:
                     height = data[point[1]][point[0]]
@@ -641,21 +635,15 @@ class Hybriddekning:
                 heights = np.empty(count)
                 dists = np.empty(count)
 
-                timings["points"] += (datetime.now() - start).total_seconds() * 1000
-                start = datetime.now()
                     heights[i] = height
                     dists[i] = accumulatedDist
 
-                #Parallelliser:
 
-                timings["signals"] += (datetime.now() - start).total_seconds() * 1000
-                start = datetime.now()
                 result = self.calculate_propagation_np(dists, heights, ant.frequencyHz, ant.height)
                 if result > 0 and result < minSignal:
                     minSignal = result
 
 
-        self.timingLog += str(timings) + "\n"
             if minSignal != 999999:
                 filearray[int(celle[1]-miny)][int(celle[0]-minx)] = minSignal
 
