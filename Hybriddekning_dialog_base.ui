@@ -77,27 +77,22 @@
    <property name="orientation">
     <enum>Qt::Horizontal</enum>
    </property>
-   <widget class="QRadioButton" name="radioButton_2">
+   <widget class="QRadioButton" name="rb_calcSignal">
     <property name="text">
      <string>Calculate signal</string>
     </property>
+    <property name="checked">
+     <bool>true</bool>
+    </property>
    </widget>
-   <widget class="QRadioButton" name="radioButton_3">
+   <widget class="QRadioButton" name="rb_optimize">
     <property name="text">
      <string>Optimize</string>
     </property>
    </widget>
-   <widget class="QRadioButton" name="radioButton">
+   <widget class="QRadioButton" name="rb_plotHeight">
     <property name="text">
      <string>Plot height profile </string>
-    </property>
-   </widget>
-   <widget class="QRadioButton" name="rb_testCalcSignal">
-    <property name="text">
-     <string>Test</string>
-    </property>
-    <property name="checked">
-     <bool>true</bool>
     </property>
    </widget>
   </widget>

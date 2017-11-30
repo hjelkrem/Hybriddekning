@@ -664,16 +664,13 @@ class Hybriddekning:
         # See if OK was pressed
         if result:
 
-            if self.dlg.radioButton.isChecked():
+            if self.dlg.rb_plotHeight.isChecked():
                 self.printHeightProfile()
                 
-            elif self.dlg.radioButton_2.isChecked():
+            elif self.dlg.rb_calcSignal.isChecked():
                 self.calculateSignal()
 
-            elif self.dlg.rb_testCalcSignal.isChecked():
-                self.calculateSignal_mt()
-
-            elif self.dlg.radioButton_3.isChecked():
+            elif self.dlg.rb_optimize.isChecked():
                 self.optimize()
             else:
                 self.dprint("Please choose an option.")
