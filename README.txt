@@ -1,33 +1,30 @@
-Plugin Builder Results
+Plugin for calculating path loss between antenna and road.
 
-Your plugin Hybriddekning was created in:
-    C:\Users\ohje\.qgis2\python\plugins\Hybriddekning
+Explanation of GUI:
+Input file must be on .TIFF-format. When a file is selected, the result is written to file. If no file is selected, the layer is saved in memory. Meomory saved files will disappear from the screen if the canvas is zoomed. Therefore, it is recommended to choose a file for saving the results.
 
-Your QGIS plugin directory is located at:
-    C:/Users/ohje/.qgis2/python/plugins
+When the calculations are complete, default styles can be applied to visualise the results. These can be found in the Hybriddekning-folder.
 
-What's Next:
+Option Calculate signal:
+Input must be the following:
+-Terrain raster and surface raster. These should overlap. 
+-Antenna layer. One or more antennas with the following attributes: ID (integer), Frequency in MHz (integer), Height above ground in meters (integer)
+-Road layer. IMPORTANT: One or more links must be selected. The calculations will be done for selected links only.
 
-  * Copy the entire directory containing your new plugin to the QGIS plugin
-    directory
+The calculations will be done for each antenna visible in the Canvas. Therefore, a proper zoom level should be chosen. The calculations are time consuming for large areas. If in doubt, select a smaller area.
 
-  * Compile the resources file using pyrcc4
+Option Optimize:
+Inout must be following:
+-Surface raster
+-Road layer. IMPORTANT: One or more links must be selected. The calculations will be done for selected links only.
 
-  * Run the tests (``make test``)
+Very time consuming method. Not thoughourly tested. Use with care.
 
-  * Test the plugin by enabling it in the QGIS plugin manager
 
-  * Customize it by editing the implementation file: ``Hybriddekning.py``
+Option plot height profile:
+Input must be the following:
+-Raster 
+-Point layer. Layer must have exactly two points.
 
-  * Create your own custom icon, replacing the default icon.png
+A height profile between the two points is drawn, based on heights sampled from the rasterfile.
 
-  * Modify your user interface by opening Hybriddekning.ui in Qt Designer
-
-  * You can use the Makefile to compile your Ui and resource files when
-    you make changes. This requires GNU make (gmake)
-
-For more information, see the PyQGIS Developer Cookbook at:
-http://www.qgis.org/pyqgis-cookbook/index.html
-
-(C) 2011-2014 GeoApt LLC - geoapt.com
-Git revision : $Format:%H$
