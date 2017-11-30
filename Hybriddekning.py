@@ -29,6 +29,7 @@ import resources
 # Import the code for the dialog
 from Hybriddekning_dialog import HybriddekningDialog
 from antenna import Antenna
+from rasterLayer import RasterLayer
 from timing import Timing
 import multiprocessing
 import threading
@@ -263,10 +264,12 @@ class Hybriddekning:
                 self.dprint("Using layer: {0} for terrain".format(lyr.name()))
                 rasterfile=lyr
                 rasterfilename=lyr.source()
+                rastercrs=lyr.crs()
                 foundraster=True
             if type(lyr) is QgsVectorLayer and lyr.geometryType()==0 and lyr.name() in checkednames:
                 self.dprint("Using layer: {0} for antennas".format(lyr.name()))
                 antennaLayer=lyr
+                antennacrs=lyr.crs()
                 foundantenna=True
         if foundantenna and foundraster:
             ants=[]
@@ -275,6 +278,8 @@ class Hybriddekning:
                 ants.append(feature.geometry().asPoint())
             if len(ants)!=2:
                 self.dprint("Too many points! Select only two")
+            elif rastercrs!=antennacrs:
+                self.dprint("Projections not matching!")
             else:
 
                 raster = gdal.Open(rasterfilename)
@@ -329,35 +334,10 @@ class Hybriddekning:
             self.lastTiming = datetime.now()
 
         if reset:
-            self.timingLog += message + "\n"
+            QgsMessageLog.logMessage(message, "Hybriddekning", 0)
         else:
             delta = datetime.now() - self.lastTiming
-            self.timingLog += "    " + message + ": " + str(delta.total_seconds() * 1000) + "\n"
-
-    def pickLayers(self):
-        #Extract the names of all checked layers
-        checkednames = [x.name() for x in iface.mapCanvas().layers()]
-
-        #Extract all layers that have names matching the checked layers
-        layers = [x for x in QgsMapLayerRegistry.instance().mapLayers().values() if x.name() in checkednames]
-
-        raster = None
-        road = None
-        antenna = None
-
-        #Enumerate all layers and pick the layers to use
-        for layer in layers:
-            if raster is None and type(layer) is QgsRasterLayer:
-                raster = layer
-            if road is None and type(layer) is QgsVectorLayer and layer.geometryType() == 1: #layer.geometryType() #0=points, 1=line, 2=polygon
-                road = layer
-            if antenna is None and type(layer) is QgsVectorLayer and layer.geometryType() == 0:
-                antenna = layer
-
-            if raster is not None and road is not None and antenna is not None:
-                break
-
-        return raster, road, antenna
+            QgsMessageLog.logMessage("    " + message + ": " + str(delta.total_seconds() * 1000), "Hybriddekning", 0)
 
     def findValidAntennas(self, antennaLayer, geotransform, xmin, xmax, ymin, ymax):
         start_point = QgsPoint(xmin, ymax)
@@ -375,7 +355,7 @@ class Hybriddekning:
 
         return validAntennas
 
-    def calculateSignalAtPoint(self, rasterHeights, validAntennas, cell):
+    def calculateSignalAtPoint(self, cellSizeInMeters, surface, terrain, validAntennas, cell):
 
         foundSignal = False
         minSignal = 999999
@@ -383,7 +363,11 @@ class Hybriddekning:
         for ant in validAntennas:
 
             points = self.get_cells_Bresenham(cell, ant.qgisPoint)
-            length = np.hypot(cell[0] - ant.qgisPoint[0], cell[1] - ant.qgisPoint[1])
+
+            if len(points) <= 3: # Not enough points between the start and end points.
+                continue
+
+            length = cellSizeInMeters * np.hypot(cell[0] - ant.qgisPoint[0], cell[1] - ant.qgisPoint[1])
             count = len(points)
             std_dist = length / count * 0.001
             heights = np.empty(count)
@@ -391,7 +375,11 @@ class Hybriddekning:
             accumulatedDist = 0.0
 
             for i, point in enumerate(points):
-                height = rasterHeights[point[1]][point[0]]
+                
+                firstOrLastPoint = True if i < 1 or i >= len(points) - 1 else False
+                heightSource = terrain if firstOrLastPoint else surface
+                height = heightSource.data[point[1]][point[0]]
+
                 heights[i] = height
                 dists[i] = accumulatedDist
                 accumulatedDist += std_dist
@@ -403,24 +391,54 @@ class Hybriddekning:
 
             return foundSignal, minSignal
 
+    def findCellSizeInMeters(self, raster):
+
+        bag_gtrn = raster.geotransform
+        bag_proj = raster.raster.GetProjectionRef()
+        bag_srs = osr.SpatialReference(bag_proj)
+        geo_srs =bag_srs.CloneGeogCS()                 # new srs obj to go from x,y -> φ,λ
+        transform = osr.CoordinateTransformation( bag_srs, geo_srs)
+
+        point1=(0,0)
+        point2=(0,1)
+
+        x1 = bag_gtrn[0] + bag_gtrn[1] * point1[0] + bag_gtrn[2] * point1[1]
+        y1 = bag_gtrn[3] + bag_gtrn[4] * point1[0] + bag_gtrn[5] * point1[1]
+        x2 = bag_gtrn[0] + bag_gtrn[1] * point2[0] + bag_gtrn[2] * point2[1]
+        y2 = bag_gtrn[3] + bag_gtrn[4] * point2[0] + bag_gtrn[5] * point2[1]  
+
+        point1 = transform.TransformPoint(x1, y1)[:2]
+        point2 = transform.TransformPoint(x2, y2)[:2]
+        firstpoint=QgsPoint(point1[0],point1[1])
+        secondpoint=QgsPoint(point2[0],point2[1])
+
+        #Create a measure object
+        distance = QgsDistanceArea()
+        crs = QgsCoordinateReferenceSystem()
+        crs.createFromSrsId(3452) # EPSG:4326
+        distance.setSourceCrs(crs)
+        distance.setEllipsoidalMode(True)
+        distance.setEllipsoid('WGS84')
+        return int(round(distance.measureLine(firstpoint, secondpoint)))
+
     def calculateSignal(self):
 
-        rasterfile, roadLayer, antennaLayer = self.pickLayers()
-        
+        surfaceLayer = self.dlg.getSurfaceLayer()
+        terrainLayer = self.dlg.getTerrainLayer()
+        roadLayer = self.dlg.getRoadLayer()
+        antennaLayer = self.dlg.getAntennaLayer()
+
         #If we didn't find the required layers, exit immediately.
-        if rasterfile is None or roadLayer is None or antennaLayer is None:
-            self.dprint("Not sufficient layers for calculations")
+        if surfaceLayer is None or terrainLayer is None or roadLayer is None or antennaLayer is None:
+            self.dprint("Please pick which layers to use before running the calculations.")
             return
 
         #If no road links are selected, exit immediately
         selectedRoadLinks = roadLayer.selectedFeatures()
         if len(selectedRoadLinks) <= 0:
-            self.dprint("No roadlinks selected")
+            self.dprint("Please select at least one road link in the road layer.")
             return
 
-        #Let the user know which layers have been selected
-        self.dprint("Selected layers:\r\n - Terrain: {0}\r\n - Antennas: {1}\r\n - Road network: {2}".format(rasterfile.name(), antennaLayer.name(), roadLayer.name()))
-        
         self.timeit("Starting new calculations ...", True)
 
         ext = iface.mapCanvas().extent()
@@ -431,12 +449,18 @@ class Hybriddekning:
 
         coords = "%f,%f,%f,%f" %(xmin, xmax, ymin, ymax)  
 
-        raster = gdal.Open(rasterfile.source())
-        band = raster.GetRasterBand(1)
-        geotransform = raster.GetGeoTransform()
-        rasterHeights = band.ReadAsArray(0, 0, raster.RasterXSize, raster.RasterYSize) # This is slow. Can we improve it?
+        surface = RasterLayer(surfaceLayer)
+        terrain = RasterLayer(terrainLayer)
 
-        validAntennas = self.findValidAntennas(antennaLayer, geotransform, xmin, xmax, ymin, ymax)
+        #Find cell size in meters
+        cell_size_meters = self.findCellSizeInMeters(surface)
+
+        start_point = QgsPoint(xmin, ymax)
+        end_point = QgsPoint(xmax, ymin)
+        startcella = self.findcell(start_point, surface.geotransform)
+        sluttcella = self.findcell(end_point, surface.geotransform)
+
+        validAntennas = self.findValidAntennas(antennaLayer, surface.geotransform, xmin, xmax, ymin, ymax)
 
         #If no valid antennas remain, exit immediately.
         if len(validAntennas) <= 0:
@@ -471,13 +495,13 @@ class Hybriddekning:
         for link in selectedRoadLinks:
 
             geom = link.geometry().asPolyline()
-            startcelle = self.findcell(QgsPoint(geom[0]), geotransform)
+            startcelle = self.findcell(QgsPoint(geom[0]), surface.geotransform)
 
             #Find the nearest points
             addRoadPoints(startcelle[0], startcelle[1], 5)
 
             for i in range(1, len(geom)):
-                sluttcelle = self.findcell(QgsPoint(geom[i]), geotransform)
+                sluttcelle = self.findcell(QgsPoint(geom[i]), surface.geotransform)
                 cells = self.get_cells_Bresenham(startcelle, sluttcelle)
                 for cell in cells:
                     addRoadPoints(cell[0], cell[1], 10)
@@ -485,71 +509,28 @@ class Hybriddekning:
                 startcelle = sluttcelle
 
         
-        minx = min(roadpoints, key=lambda t: t[0])[0] - 500
-        miny = min(roadpoints, key=lambda t: t[1])[1] - 500
-        maxx = max(roadpoints, key=lambda t: t[0])[0] + 500
-        maxy = max(roadpoints, key=lambda t: t[1])[1] + 500
+        minx = min(roadpoints, key=lambda t: t[0])[0] - 1
+        miny = min(roadpoints, key=lambda t: t[1])[1] - 1
+        maxx = max(roadpoints, key=lambda t: t[0])[0] + 1
+        maxy = max(roadpoints, key=lambda t: t[1])[1] + 1
         rows = maxy - miny
         cols = maxx - minx
         filearray = [ [0]*cols for _ in xrange(rows) ]
 
         self.timeit("Roadlink setup")
 
-        class AsyncSignalCalculator:
+        for roadpoint in roadpoints:
+        
+            foundSignal, value = self.calculateSignalAtPoint(cell_size_meters, surface, terrain, validAntennas, roadpoint)
 
-            def __init__(self, owner, filearray, rasterHeights, validAntennas, minx, miny, roadpoints, threadCount):
-                self.owner = owner
-                self.filearray = filearray
-                self.rasterHeights = rasterHeights
-                self.validAntennas = validAntennas
-                self.minx = minx
-                self.miny = miny
-                self.roadpoints = roadpoints
-                self.threadCount = threadCount
+            if foundSignal:
+                filearray[int(roadpoint[1] - miny)][int(roadpoint[0] - minx)] = value
 
-                self.takePoint = 0
-                self.totalCount = len(self.roadpoints)
-                self.lock = threading.Lock()
-
-            def calculateAPoint(self):
-
-                with self.lock:
-                    
-                    roadpoint = self.roadpoints[self.takePoint]
-
-                    self.takePoint += 1
-                    
-                    if self.takePoint >= self.totalCount:
-                        return False
-                
-                foundSignal, value = self.owner.calculateSignalAtPoint(self.rasterHeights, self.validAntennas, roadpoint)
-
-                if foundSignal:
-                    with self.lock:
-                        self.filearray[int(roadpoint[1]-self.miny)][int(roadpoint[0]-self.minx)] = value
-
-                return True
-
-            def workThroughThePoints(self):
-                while True:
-                    if not self.calculateAPoint():
-                        break
-
-            def run(self):
-
-                threads = []
-                for i in range(self.threadCount):
-                    t = threading.Thread(target=self.workThroughThePoints)
-                    threads.append(t)
-                    t.start()
-
-                for t in threads:
-                    t.join()
-
+        # Multi threading is deactivated. The entire class needs to be restructured for this to be feasible.
+        # A working mt approach is stored in asyncSignalCalculator.py, and can be used as follows (but it needs that rectructuring first!)
         #QgsMessageLog.logMessage("Threads: " + str(multiprocessing.cpu_count()), "Debug", 0)
-
-        calc = AsyncSignalCalculator(self, filearray, rasterHeights, validAntennas, minx, miny, roadpoints, 1)
-        calc.run()
+        #calc = AsyncSignalCalculator(self, cell_size_meters, filearray, rasterHeights, validAntennas, minx, miny, roadpoints, 1)
+        #calc.run()
 
         self.timeit("Calculations")
 
@@ -558,14 +539,15 @@ class Hybriddekning:
         temp_path = os.environ['TEMP']
         tempfilename=temp_path+'temp'
         driver = gdal.GetDriverByName('GTiff')
-        dataset = driver.Create(tempfilename,100,100,1,gdal.GDT_Float32)   
+        
+        dataset = driver.Create(tempfilename,cols,rows,1,gdal.GDT_Float32)   
 
         txtPath = self.dlg.txtDem.toPlainText()
         if len(txtPath) > 0:
             tempfilename = txtPath
 
-        SRID = int(str(iface.activeLayer().crs().authid()).split(":")[1])
-        self.array2raster(tempfilename,cols,rows,geotransform,resultarray,SRID,miny,minx)
+        self.array2raster(tempfilename, cols, rows, surface.geotransform, resultarray, surface.srid(), miny, minx, cell_size_meters)
+        
         layer = QgsRasterLayer(tempfilename, 'resultat')
         # Add the layer to the map (comment the following line if the loading in the Layers Panel is not needed)
         iface.addRasterLayer(tempfilename, 'resultat')
@@ -575,8 +557,7 @@ class Hybriddekning:
 
         self.timeit("Done")
 
-        self.dprint("Calculations complete\n\n" + self.timingLog)
-  
+        self.dprint("Calculations complete")
 
     def optimize(self):
         txtPath = self.dlg.txtDem.toPlainText()
@@ -736,6 +717,7 @@ class Hybriddekning:
         #For each point in raster: Calculate best coverage
         #Use Bresenham between antennae and raster cells.
         # show the dialog
+        self.dlg.listLayers()
         self.dlg.show()
         # Run the dialog event loop
         result = self.dlg.exec_()
@@ -750,6 +732,7 @@ class Hybriddekning:
 
             elif self.dlg.rb_optimize.isChecked():
                 self.optimize()
+
             else:
                 self.dprint("Please choose an option.")
 
@@ -783,10 +766,11 @@ class Hybriddekning:
         # Write your data on the disk
         #rasterWriter(data, rasterPath, geotransform, prj_wkt, gdal.GDT_Int32)
         return data
-    def array2raster(self,filename,cols,rows,geotransform,array,SRID,miny,minx):
 
-        originX = geotransform[0]+minx
-        originY = geotransform[3]-miny
+    def array2raster(self,filename,cols,rows,geotransform,array,SRID,miny,minx,cell_size_meters):
+
+        originX = geotransform[0]+cell_size_meters*minx
+        originY = geotransform[3]-cell_size_meters*miny
         pixelWidth = geotransform[1]
         pixelHeight = geotransform[5]
         #driver = gdal.GetDriverByName('USGSDEM')
