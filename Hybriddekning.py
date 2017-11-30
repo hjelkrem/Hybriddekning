@@ -197,6 +197,20 @@ class Hybriddekning:
         # remove the toolbar
         del self.toolbar
 
+    def calculate_propagation_np(self,dists,heights,f,ant_h):
+        N=dists.size
+        hts0=ant_h # TX antenna above ground
+        hrs0=1 # RX antenna above ground
+        hts=hts0+heights[0] # TX antenna above sea level
+        hrs=hrs0+heights[N-1]    # RX antenna above sea level
+        signal=path_loss(dists,heights,hts,hrs,f)
+        #signal=int(10000000/sum(dist))
+        #for element in height_skog:
+         #   if element>0:
+          #      signal=200
+        return signal
+        """Runs the propagation model for the selected layers """
+
     def calculate_propagation(self,dist,height,f,ant_h):
         #f=5900e6
         #height=list(reversed(height))
@@ -616,8 +630,6 @@ class Hybriddekning:
                 points = self.get_cells_Bresenham(celle, ant.qgisPoint)
                 length = np.sqrt((celle[0] - ant.qgisPoint[0])**2 + (celle[1] - ant.qgisPoint[1])**2)
                 std_dist = length / len(points)
-                heights = []
-                dists = []
                 dist = 0.0
 
                 timings["init"] += (datetime.now() - start).total_seconds() * 1000
@@ -625,12 +637,14 @@ class Hybriddekning:
                 
                 for point in points:
                     height = data[point[1]][point[0]]
-                    heights.append(height)
-                    dists.append(dist)
                     dist += std_dist
+                heights = np.empty(count)
+                dists = np.empty(count)
 
                 timings["points"] += (datetime.now() - start).total_seconds() * 1000
                 start = datetime.now()
+                    heights[i] = height
+                    dists[i] = accumulatedDist
 
                 #Parallelliser:
 
