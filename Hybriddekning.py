@@ -22,7 +22,7 @@
 """
 
 from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication, QDate, QSettings, QVariant,QFile, QFileInfo
-from PyQt4.QtGui import QAction, QIcon, QMessageBox, QDateEdit, QColor, QFileDialog, QButtonGroup,QProgressBar
+from PyQt4.QtGui import QAction, QIcon, QMessageBox, QDateEdit, QColor, QFileDialog, QButtonGroup, QProgressBar
 #from qgis.core import QgsDistanceArea, QgsCoordinateReferenceSystem, QgsPoint, QgsApplication
 # Initialize Qt resources from file resources.py
 import resources
@@ -530,7 +530,7 @@ class Hybriddekning:
         raster = gdal.Open(rasterfile.source())
         band = raster.GetRasterBand(1)
         geotransform = raster.GetGeoTransform()
-        data = band.ReadAsArray(0, 0, raster.RasterXSize, raster.RasterYSize)
+        rasterHeights = band.ReadAsArray(0, 0, raster.RasterXSize, raster.RasterYSize) # This is slow. Can we improve it?
 
         start_point = QgsPoint(xmin, ymax)
         end_point = QgsPoint(xmax, ymin)
@@ -564,9 +564,7 @@ class Hybriddekning:
                     #Check if this coordinate has been added before, and add it if not.
                     isNew = False
                     if x not in roadDict:
-                        newY = {}
-                        newY[y] = 1
-                        roadDict[x] = newY
+                        roadDict[x] = { y: 1}
                         isNew = True
                     elif y not in roadDict[x]:
                         roadDict[x][y] = 1
@@ -576,6 +574,7 @@ class Hybriddekning:
                         roadpoints.append((x, y))
 
         for link in selectedRoadLinks:
+
             geom = link.geometry().asPolyline()
             startcelle = self.findcell(QgsPoint(geom[0]), geotransform)
 
@@ -589,6 +588,7 @@ class Hybriddekning:
                     addRoadPoints(cell[0], cell[1], 10)
 
                 startcelle = sluttcelle
+
         
         minx = min(roadpoints, key=lambda t: t[0])[0] - 500
         miny = min(roadpoints, key=lambda t: t[1])[1] - 500
@@ -849,7 +849,7 @@ class Hybriddekning:
                 self.optimize()
             else:
                 self.dprint("Please choose an option.")
-            
+
 
     def rasterizer(self, shapePath, rasterPath, attribute, cols,rows,geotransform,SRID):
         '''Rasterize a shapefile using its attribute value
