@@ -486,156 +486,139 @@ class Hybriddekning:
         self.dprint("Calculations complete")
 
     def optimize(self):
-        txtPath = self.dlg.txtDem.toPlainText()
-        writeFile=True if txtPath!=None else False
-        foundraster=False
-        foundroad=False
-        layernim = iface.activeLayer().name()
-        checkednames=[]
-        checkedlayers=iface.mapCanvas().layers()
-        for checklayer in checkedlayers:
-            checkednames.append(checklayer.name())
-        #pointlayers=0
-        for lyr in QgsMapLayerRegistry.instance().mapLayers().values():
-            if type(lyr) is QgsRasterLayer and lyr.name() in checkednames:
-                self.dprint("Using layer: {0} for terrain".format(lyr.name()))
-                rasterfile=lyr
-                rasterfilename=lyr.source()
-                foundraster=True
-            if type(lyr) is QgsVectorLayer and lyr.geometryType()==1 and lyr.name() in checkednames:
-                #lyr.geometryType() #0=points, 1=line, 2=polygon
-                self.dprint("Using layer: {0} for road network".format(lyr.name()))
-                roadlayer=lyr
-                foundroad=True
+        
+        surfaceLayer = self.dlg.getSurfaceLayer()
+        roadLayer = self.dlg.getRoadLayer()
+
         ext = iface.mapCanvas().extent()
         xmin = ext.xMinimum()
         xmax = ext.xMaximum()
         ymin = ext.yMinimum()
         ymax = ext.yMaximum()
         coords = "%f,%f,%f,%f" %(xmin, xmax, ymin, ymax)
-        if foundraster and foundroad:
 
-            temp_path = os.environ['TEMP']
-            tempfilename=temp_path+'temp'
-            driver = gdal.GetDriverByName('GTiff')
-            dataset = driver.Create(tempfilename,100,100,1,gdal.GDT_Float32) 
-            raster = gdal.Open(rasterfilename)
-            cols = raster.RasterXSize
-            rows = raster.RasterYSize
-            bands = raster.RasterCount
-            band = raster.GetRasterBand(1)
-            geotransform = raster.GetGeoTransform()
-            data = band.ReadAsArray(0, 0, cols, rows)
-            SRID=int(str(iface.activeLayer().crs().authid()).split(":")[1])
-            sel_features = roadlayer.selectedFeatures()
-            roadpoints=[]
-            if len(sel_features)>0:
-                for f in sel_features:
-                    geom = f.geometry().asPolyline()
-                    start_point = QgsPoint(geom[0])
-                    startcelle=self.findcell(start_point,geotransform)
-                    if startcelle not in roadpoints:
-                        roadpoints.append(startcelle)
-                    for i in range(1,len(geom)):
-                        end_point = QgsPoint(geom[i])
-                        sluttcelle=self.findcell(end_point,geotransform)
-                        if sluttcelle!=startcelle:
-                            cell_array=self.get_cells_Bresenham(startcelle,sluttcelle)
-                            for cell in cell_array:
-                                if cell not in roadpoints:
-                                    roadpoints.append(cell)
-                            startcelle=sluttcelle
-                start_point=QgsPoint(xmin,ymax)
-                ident = rasterfile.dataProvider().identify(QgsPoint(xmin,ymax), QgsRaster.IdentifyFormatValue)
-                startcella=self.findcell(start_point,geotransform)
-                end_point=QgsPoint(xmax,ymin)
-                sluttcella=self.findcell(end_point,geotransform)
-                sel_features = roadlayer.selectedFeatures()
-                roadpoints2=[]
-                width=10
-                for f in sel_features:
-                    geom = f.geometry().asPolyline()
-                    start_point = QgsPoint(geom[0])
-                    startcelle=self.findcell(start_point,geotransform)
-                    #Finn de nærmeste punkter:
-                    for x in range(startcelle[0]-width,startcelle[0]+width):
-                        for y in range(startcelle[1]-width,startcelle[1]+width):
-                            celle=(x,y)
-                            if celle not in roadpoints2:
-                    #if startcelle not in roadpoints:
-                                roadpoints2.append(celle)
-                    for i in range(1,len(geom)):
-                        end_point = QgsPoint(geom[i])
-                        sluttcelle=self.findcell(end_point,geotransform)
-                        if sluttcelle!=startcelle:
-                            cell_array=self.get_cells_Bresenham(startcelle,sluttcelle)
-                            for cell in cell_array:
-                                for x in range(cell[0]-width,cell[0]+width):
-                                    for y in range(cell[1]-width,cell[1]+width):
-                                        celle=(x,y)
-                                        if celle not in roadpoints2:                                
-                                #if cell not in roadpoints:
-                                            roadpoints2.append(celle)
-                            startcelle=sluttcelle
-
-                minx=min(roadpoints2, key = lambda t: t[1])[0]-500
-                miny=min(roadpoints2, key = lambda t: t[0])[1]-500
-                maxx=max(roadpoints2, key = lambda t: t[1])[0]+500
-                maxy=max(roadpoints2, key = lambda t: t[0])[1]+500
-                cols2=maxy-miny
-                rows2=maxx-minx
-                filearray = [ [0]*cols2 for _ in xrange(rows2) ]
-                #filearray = [ [0]*cols for _ in xrange(rows) ]
-                f=5900*1000000 #Conv from MHz to Hz
-                ant_h=10
-                for roadpoint2 in roadpoints2:
-                    celle=roadpoint2
-                    signal=0
-                    for roadpoint in roadpoints:
-                        if celle !=roadpoint:
-                            points=self.get_cells_Bresenham(celle,roadpoint)
-                            no_points=len(points)
-                            length=np.sqrt((celle[0]-roadpoint[0])**2 + (celle[1]-roadpoint[1])**2)
-                            std_dist=length/no_points
-                            heights=[]
-                            dists=[]
-                            dist=0.0
-                            for point in points:
-                                height=data[point[1]][point[0]]
-                                heights.append(height)
-                                dists.append(dist)
-                                dist+=std_dist
-                            if len(dists)>2 and len(heights)>2:
-                                #self.dprint(str(heights))
-                                calc_signal=self.calculate_propagation(dists,heights,f,ant_h)
-                                if calc_signal>0:
-                                    signal+=calc_signal
-                    filearray[int(celle[1]-miny)][int(celle[0]-minx)]=signal
-                resultarray = np.array(filearray)
-                
-                resultarray *= (100.0/resultarray.max())
-                if len(txtPath)>0:
-                    tempfilename=txtPath
-                self.array2raster(tempfilename,cols2,rows2,geotransform,resultarray,SRID,miny,minx)
-                layer = QgsRasterLayer(tempfilename, 'resultat')
-                uri = str(os.path.dirname(os.path.realpath(__file__)))+"\default_optimize.qml"
-                layer.loadNamedStyle(uri)
-                # Add the layer to the map (comment the following line if the loading in the Layers Panel is not needed)
-                iface.addRasterLayer(tempfilename, 'resultat')
-                QgsMapLayerRegistry.instance().addMapLayer(layer,False)
-                #layer.loadNamedStyle(uri)
-                #iface.legendInterface().refreshLayerSymbology(layer)
-                #self.dprint(uri)
-                #iface.messageBar().clearWidgets() 
-                self.dprint("Calculations complete")
-            else:
-                self.dprint("No roadlinks selected")
-            
-            
-        else:
+        if surfaceLayer is None or roadLayer is None:
             self.dprint("Not sufficient layers for calculations")
-                    #iface.messageBar().pushMessage("Output", str(originX), level=QgsMessageBar.INFO)
+            return
+
+        temp_path = os.environ['TEMP']
+        tempfilename=temp_path+'temp'
+        driver = gdal.GetDriverByName('GTiff')
+        dataset = driver.Create(tempfilename,100,100,1,gdal.GDT_Float32) 
+        raster = gdal.Open(rasterfilename)
+        cols = raster.RasterXSize
+        rows = raster.RasterYSize
+        bands = raster.RasterCount
+        band = raster.GetRasterBand(1)
+        geotransform = raster.GetGeoTransform()
+        data = band.ReadAsArray(0, 0, cols, rows)
+        SRID=int(str(iface.activeLayer().crs().authid()).split(":")[1])
+        sel_features = roadlayer.selectedFeatures()
+        roadpoints=[]
+        if len(sel_features)>0:
+            for f in sel_features:
+                geom = f.geometry().asPolyline()
+                start_point = QgsPoint(geom[0])
+                startcelle=self.findcell(start_point,geotransform)
+                if startcelle not in roadpoints:
+                    roadpoints.append(startcelle)
+                for i in range(1,len(geom)):
+                    end_point = QgsPoint(geom[i])
+                    sluttcelle=self.findcell(end_point,geotransform)
+                    if sluttcelle!=startcelle:
+                        cell_array=self.get_cells_Bresenham(startcelle,sluttcelle)
+                        for cell in cell_array:
+                            if cell not in roadpoints:
+                                roadpoints.append(cell)
+                        startcelle=sluttcelle
+            start_point=QgsPoint(xmin,ymax)
+            ident = rasterfile.dataProvider().identify(QgsPoint(xmin,ymax), QgsRaster.IdentifyFormatValue)
+            startcella=self.findcell(start_point,geotransform)
+            end_point=QgsPoint(xmax,ymin)
+            sluttcella=self.findcell(end_point,geotransform)
+            sel_features = roadlayer.selectedFeatures()
+            roadpoints2=[]
+            width=10
+            for f in sel_features:
+                geom = f.geometry().asPolyline()
+                start_point = QgsPoint(geom[0])
+                startcelle=self.findcell(start_point,geotransform)
+                #Finn de nærmeste punkter:
+                for x in range(startcelle[0]-width,startcelle[0]+width):
+                    for y in range(startcelle[1]-width,startcelle[1]+width):
+                        celle=(x,y)
+                        if celle not in roadpoints2:
+                #if startcelle not in roadpoints:
+                            roadpoints2.append(celle)
+                for i in range(1,len(geom)):
+                    end_point = QgsPoint(geom[i])
+                    sluttcelle=self.findcell(end_point,geotransform)
+                    if sluttcelle!=startcelle:
+                        cell_array=self.get_cells_Bresenham(startcelle,sluttcelle)
+                        for cell in cell_array:
+                            for x in range(cell[0]-width,cell[0]+width):
+                                for y in range(cell[1]-width,cell[1]+width):
+                                    celle=(x,y)
+                                    if celle not in roadpoints2:                                
+                            #if cell not in roadpoints:
+                                        roadpoints2.append(celle)
+                        startcelle=sluttcelle
+
+            minx=min(roadpoints2, key = lambda t: t[1])[0]-500
+            miny=min(roadpoints2, key = lambda t: t[0])[1]-500
+            maxx=max(roadpoints2, key = lambda t: t[1])[0]+500
+            maxy=max(roadpoints2, key = lambda t: t[0])[1]+500
+            cols2=maxy-miny
+            rows2=maxx-minx
+            filearray = [ [0]*cols2 for _ in xrange(rows2) ]
+            #filearray = [ [0]*cols for _ in xrange(rows) ]
+            f=5900*1000000 #Conv from MHz to Hz
+            ant_h=10
+            for roadpoint2 in roadpoints2:
+                celle=roadpoint2
+                signal=0
+                for roadpoint in roadpoints:
+                    if celle !=roadpoint:
+                        points=self.get_cells_Bresenham(celle,roadpoint)
+                        no_points=len(points)
+                        length=np.sqrt((celle[0]-roadpoint[0])**2 + (celle[1]-roadpoint[1])**2)
+                        std_dist=length/no_points
+                        heights=[]
+                        dists=[]
+                        dist=0.0
+                        for point in points:
+                            height=data[point[1]][point[0]]
+                            heights.append(height)
+                            dists.append(dist)
+                            dist+=std_dist
+                        if len(dists)>2 and len(heights)>2:
+                            #self.dprint(str(heights))
+                            calc_signal=self.calculate_propagation(dists,heights,f,ant_h)
+                            if calc_signal>0:
+                                signal+=calc_signal
+                filearray[int(celle[1]-miny)][int(celle[0]-minx)]=signal
+            resultarray = np.array(filearray)
             
+            resultarray *= (100.0/resultarray.max())
+
+            writeFile=True if txtPath!=None else False
+            txtPath = self.dlg.txtDem.toPlainText()
+            if len(txtPath)>0:
+                tempfilename=txtPath
+            self.array2raster(tempfilename,cols2,rows2,geotransform,resultarray,SRID,miny,minx)
+            layer = QgsRasterLayer(tempfilename, 'resultat')
+            uri = str(os.path.dirname(os.path.realpath(__file__)))+"\default_optimize.qml"
+            layer.loadNamedStyle(uri)
+            # Add the layer to the map (comment the following line if the loading in the Layers Panel is not needed)
+            iface.addRasterLayer(tempfilename, 'resultat')
+            QgsMapLayerRegistry.instance().addMapLayer(layer,False)
+            #layer.loadNamedStyle(uri)
+            #iface.legendInterface().refreshLayerSymbology(layer)
+            #self.dprint(uri)
+            #iface.messageBar().clearWidgets() 
+            self.dprint("Calculations complete")
+        else:
+            self.dprint("No roadlinks selected")            
 
     
     def run(self):
