@@ -30,6 +30,8 @@ import resources
 from Hybriddekning_dialog import HybriddekningDialog
 from antenna import Antenna
 from timing import Timing
+import multiprocessing
+import threading
 import os.path
 from osgeo import osr, gdal, ogr
 from qgis.gui import QgsMessageBar
@@ -493,32 +495,61 @@ class Hybriddekning:
 
         self.timeit("Roadlink setup")
 
-        for celle in roadpoints:
-            minSignal = 999999
-            for ant in validAntennas:
+        class AsyncSignalCalculator:
 
-                points = self.get_cells_Bresenham(celle, ant.qgisPoint)
-                length = np.hypot(celle[0] - ant.qgisPoint[0], celle[1] - ant.qgisPoint[1])
-                count = len(points)
-                std_dist = length / count * 0.001
-                heights = np.empty(count)
-                dists = np.empty(count)
-                accumulatedDist = 0.0
+            def __init__(self, owner, filearray, rasterHeights, validAntennas, minx, miny, roadpoints, threadCount):
+                self.owner = owner
+                self.filearray = filearray
+                self.rasterHeights = rasterHeights
+                self.validAntennas = validAntennas
+                self.minx = minx
+                self.miny = miny
+                self.roadpoints = roadpoints
+                self.threadCount = threadCount
 
-                for i, point in enumerate(points):
-                    height = rasterHeights[point[1]][point[0]]
-                    heights[i] = height
-                    dists[i] = accumulatedDist
-                    accumulatedDist += std_dist
+                self.takePoint = 0
+                self.totalCount = len(self.roadpoints)
+                self.lock = threading.Lock()
 
+            def calculateAPoint(self):
 
-                result = self.calculate_propagation_np(dists, heights, ant.frequencyHz, ant.height)
-                if result > 0 and result < minSignal:
-                    minSignal = result
+                with self.lock:
+                    
+                    roadpoint = self.roadpoints[self.takePoint]
 
+                    self.takePoint += 1
+                    
+                    if self.takePoint >= self.totalCount:
+                        return False
+                
+                foundSignal, value = self.owner.calculateSignalAtPoint(self.rasterHeights, self.validAntennas, roadpoint)
 
-            if minSignal != 999999:
-                filearray[int(celle[1]-miny)][int(celle[0]-minx)] = minSignal
+                if foundSignal:
+                    with self.lock:
+                        self.filearray[int(roadpoint[1]-self.miny)][int(roadpoint[0]-self.minx)] = value
+
+                return True
+
+            def workThroughThePoints(self):
+                while True:
+                    if not self.calculateAPoint():
+                        break
+
+            def run(self):
+
+                threads = []
+                for i in range(self.threadCount):
+                    t = threading.Thread(target=self.workThroughThePoints)
+                    threads.append(t)
+                    t.start()
+
+                for t in threads:
+                    t.join()
+
+        #QgsMessageLog.logMessage("Threads: " + str(multiprocessing.cpu_count()), "Debug", 0)
+
+        calc = AsyncSignalCalculator(self, filearray, rasterHeights, validAntennas, minx, miny, roadpoints, 1)
+        calc.run()
 
         self.timeit("Calculations")
 
