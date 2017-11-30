@@ -625,13 +625,13 @@ class Hybriddekning:
             for ant in validAntennas:
 
                 points = self.get_cells_Bresenham(celle, ant.qgisPoint)
-                length = np.sqrt((celle[0] - ant.qgisPoint[0])**2 + (celle[1] - ant.qgisPoint[1])**2)
                 std_dist = length / len(points)
                 dist = 0.0
                 
                 for point in points:
                     height = data[point[1]][point[0]]
                     dist += std_dist
+                length = np.hypot(celle[0] - ant.qgisPoint[0], celle[1] - ant.qgisPoint[1])
                 heights = np.empty(count)
                 dists = np.empty(count)
 
