@@ -607,7 +607,7 @@ class Hybriddekning:
         }
         
         for celle in roadpoints:
-            signals = []
+            minSignal = 999999
             for ant in validAntennas:
                 #Parallelliser:
 
@@ -633,17 +633,17 @@ class Hybriddekning:
                 start = datetime.now()
 
                 #Parallelliser:
-                calc_signal = self.calculate_propagation(dists, heights, ant.frequencyHz, ant.height)
-                if calc_signal > 0:
-                    signals.append(calc_signal)
 
                 timings["signals"] += (datetime.now() - start).total_seconds() * 1000
                 start = datetime.now()
+                result = self.calculate_propagation_np(dists, heights, ant.frequencyHz, ant.height)
+                if result > 0 and result < minSignal:
+                    minSignal = result
 
-            if len(signals) > 0:
-                filearray[int(celle[1]-miny)][int(celle[0]-minx)] = min(signals)
 
         self.timingLog += str(timings) + "\n"
+            if minSignal != 999999:
+                filearray[int(celle[1]-miny)][int(celle[0]-minx)] = minSignal
 
         self.timeit("Calculations")
 
