@@ -32,9 +32,9 @@
   <widget class="QTextBrowser" name="txtDem">
    <property name="geometry">
     <rect>
-     <x>250</x>
+     <x>20</x>
      <y>40</y>
-     <width>331</width>
+     <width>561</width>
      <height>31</height>
     </rect>
    </property>
@@ -56,13 +56,13 @@
    <property name="geometry">
     <rect>
      <x>20</x>
-     <y>40</y>
-     <width>221</width>
+     <y>10</y>
+     <width>281</width>
      <height>20</height>
     </rect>
    </property>
    <property name="text">
-    <string>Choose rasterfile for saving results (optional)</string>
+    <string>Choose rasterfile for saving results (recommended)</string>
    </property>
   </widget>
   <widget class="QSplitter" name="splitter">
@@ -90,14 +90,6 @@
    <widget class="QRadioButton" name="radioButton">
     <property name="text">
      <string>Plot height profile </string>
-    </property>
-   </widget>
-   <widget class="QRadioButton" name="rb_testCalcSignal">
-    <property name="text">
-     <string>Test</string>
-    </property>
-    <property name="checked">
-     <bool>true</bool>
     </property>
    </widget>
   </widget>
