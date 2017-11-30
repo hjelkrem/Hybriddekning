@@ -625,18 +625,18 @@ class Hybriddekning:
             for ant in validAntennas:
 
                 points = self.get_cells_Bresenham(celle, ant.qgisPoint)
-                std_dist = length / len(points)
-                dist = 0.0
-                
-                for point in points:
-                    height = data[point[1]][point[0]]
-                    dist += std_dist
                 length = np.hypot(celle[0] - ant.qgisPoint[0], celle[1] - ant.qgisPoint[1])
+                count = len(points)
+                std_dist = length / count * 0.001
                 heights = np.empty(count)
                 dists = np.empty(count)
+                accumulatedDist = 0.0
 
+                for i, point in enumerate(points):
+                    height = rasterHeights[point[1]][point[0]]
                     heights[i] = height
                     dists[i] = accumulatedDist
+                    accumulatedDist += std_dist
 
 
                 result = self.calculate_propagation_np(dists, heights, ant.frequencyHz, ant.height)
