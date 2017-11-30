@@ -347,6 +347,49 @@ class Hybriddekning:
 
         return foundSignal, minSignal
 
+    def getRoadPoints(self, surface, roadLayer):
+
+        roadpoints = []
+
+        #Using a dictionary to store which coordinates have been added to the list.
+        #This gives a slight additional memory overhead, but a huge performance boost,
+        #as the dictionary checks are O(1).
+        roadDict = {}
+
+        def addRoadPoints(sx, sy, radius):
+            for x in range(sx - radius, sx + radius):
+                for y in range(sy - radius, sy + radius):
+
+                    #Check if this coordinate has been added before, and add it if not.
+                    isNew = False
+                    if x not in roadDict:
+                        roadDict[x] = { y: 1}
+                        isNew = True
+                    elif y not in roadDict[x]:
+                        roadDict[x][y] = 1
+                        isNew = True
+
+                    if isNew:
+                        roadpoints.append((x, y))
+
+        for link in roadLayer.selectedFeatures():
+
+            geom = link.geometry().asPolyline()
+            startcelle = self.findcell(QgsPoint(geom[0]), surface.geotransform)
+
+            #Find the nearest points
+            addRoadPoints(startcelle[0], startcelle[1], 5)
+
+            for i in range(1, len(geom)):
+                sluttcelle = self.findcell(QgsPoint(geom[i]), surface.geotransform)
+                cells = self.get_cells_Bresenham(startcelle, sluttcelle)
+                for cell in cells:
+                    addRoadPoints(cell[0], cell[1], 10)
+
+                startcelle = sluttcelle
+
+        return roadpoints
+
     def calculateSignal(self):
 
         surfaceLayer = self.dlg.getSurfaceLayer()
@@ -360,8 +403,7 @@ class Hybriddekning:
             return
 
         #If no road links are selected, exit immediately
-        selectedRoadLinks = roadLayer.selectedFeatures()
-        if len(selectedRoadLinks) <= 0:
+        if len(roadLayer.selectedFeatures()) <= 0:
             self.dprint("Please select at least one road link in the road layer.")
             return
 
@@ -393,47 +435,9 @@ class Hybriddekning:
             self.dprint("No antennae visible in canvas!")
             return   
 
-        roadpoints = []
-
-        #Using a dictionary to store which coordinates have been added to the list.
-        #This gives a slight additional memory overhead, but a huge performance boost,
-        #as the dictionary checks are O(1).
-        roadDict = {}
-
         self.timeit("Init")
 
-        def addRoadPoints(sx, sy, radius):
-            for x in range(sx - radius, sx + radius):
-                for y in range(sy - radius, sy + radius):
-
-                    #Check if this coordinate has been added before, and add it if not.
-                    isNew = False
-                    if x not in roadDict:
-                        roadDict[x] = { y: 1}
-                        isNew = True
-                    elif y not in roadDict[x]:
-                        roadDict[x][y] = 1
-                        isNew = True
-
-                    if isNew:
-                        roadpoints.append((x, y))
-
-        for link in selectedRoadLinks:
-
-            geom = link.geometry().asPolyline()
-            startcelle = self.findcell(QgsPoint(geom[0]), surface.geotransform)
-
-            #Find the nearest points
-            addRoadPoints(startcelle[0], startcelle[1], 5)
-
-            for i in range(1, len(geom)):
-                sluttcelle = self.findcell(QgsPoint(geom[i]), surface.geotransform)
-                cells = self.get_cells_Bresenham(startcelle, sluttcelle)
-                for cell in cells:
-                    addRoadPoints(cell[0], cell[1], 10)
-
-                startcelle = sluttcelle
-
+        roadpoints = self.getRoadPoints(surface, roadLayer)
         
         minx = min(roadpoints, key=lambda t: t[0])[0] - 1
         miny = min(roadpoints, key=lambda t: t[1])[1] - 1
