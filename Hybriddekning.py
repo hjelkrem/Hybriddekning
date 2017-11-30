@@ -240,8 +240,10 @@ class Hybriddekning:
     def bilinear(self, x1,x2,y1,y2,x,y,data):
         p=data[y1][x1]*((x2+0.5)-x)*((y2+0.5)-y)+data[y1][x2]*(x-(x1+0.5))*((y2+0.5)-y)+data[y2][x1]*((x2+0.5)-x)*(y-(y1+0.5))+data[y2][x2]*(x-(x1+0.5))*(y-(y1+0.5))
         return p
+
     def dprint(self,msg):
         QMessageBox.information(self.iface.mainWindow(),"Message",msg)
+
     def open_txt_file(self):
         filename = QFileDialog.getOpenFileName(self.dlg, "Select rasterfile to write to", "", "*.tif")
         self.dlg.txtDem.setText(filename)
@@ -330,22 +332,78 @@ class Hybriddekning:
             delta = datetime.now() - self.lastTiming
             self.timingLog += "    " + message + ": " + str(delta.total_seconds() * 1000) + "\n"
 
+    def pickLayers(self):
         #Extract the names of all checked layers
         checkednames = [x.name() for x in iface.mapCanvas().layers()]
 
         #Extract all layers that have names matching the checked layers
         layers = [x for x in QgsMapLayerRegistry.instance().mapLayers().values() if x.name() in checkednames]
 
+        raster = None
+        road = None
+        antenna = None
+
         #Enumerate all layers and pick the layers to use
-        for lyr in layers:
-            if type(lyr) is QgsRasterLayer:
-                rasterfile = lyr
-            if type(lyr) is QgsVectorLayer and lyr.geometryType() == 1: #lyr.geometryType() #0=points, 1=line, 2=polygon
-                roadLayer = lyr
-            if type(lyr) is QgsVectorLayer and lyr.geometryType() == 0:
-                antennaLayer = lyr
+        for layer in layers:
+            if raster is None and type(layer) is QgsRasterLayer:
+                raster = layer
+            if road is None and type(layer) is QgsVectorLayer and layer.geometryType() == 1: #layer.geometryType() #0=points, 1=line, 2=polygon
+                road = layer
+            if antenna is None and type(layer) is QgsVectorLayer and layer.geometryType() == 0:
+                antenna = layer
+
+            if raster is not None and road is not None and antenna is not None:
+                break
+
+        return raster, road, antenna
+
+    def findValidAntennas(self, antennaLayer, geotransform, xmin, xmax, ymin, ymax):
+        start_point = QgsPoint(xmin, ymax)
+        end_point = QgsPoint(xmax, ymin)
+        startcella = self.findcell(start_point, geotransform)
+        sluttcella = self.findcell(end_point, geotransform)
+
+        antennas = Antenna.fromFeatures(antennaLayer.getFeatures())
+        validAntennas = []
+
+        for ant in antennas:
+            ant.qgisPoint = self.findcell(ant.point, geotransform)
+            if ant.qgisPoint[0] > startcella[0] and ant.qgisPoint[0] < sluttcella[0] and ant.qgisPoint[1] > startcella[1] and ant.qgisPoint[1] < sluttcella[1]:
+                validAntennas.append(ant)
+
+        return validAntennas
+
+    def calculateSignalAtPoint(self, rasterHeights, validAntennas, cell):
+
+        foundSignal = False
+        minSignal = 999999
+
+        for ant in validAntennas:
+
+            points = self.get_cells_Bresenham(cell, ant.qgisPoint)
+            length = np.hypot(cell[0] - ant.qgisPoint[0], cell[1] - ant.qgisPoint[1])
+            count = len(points)
+            std_dist = length / count * 0.001
+            heights = np.empty(count)
+            dists = np.empty(count)
+            accumulatedDist = 0.0
+
+            for i, point in enumerate(points):
+                height = rasterHeights[point[1]][point[0]]
+                heights[i] = height
+                dists[i] = accumulatedDist
+                accumulatedDist += std_dist
+
+            result = self.calculate_propagation_np(dists, heights, ant.frequencyHz, ant.height)
+            if result > 0 and result < minSignal:
+                minSignal = result
+                foundSignal = True
+
+            return foundSignal, minSignal
+
     def calculateSignal(self):
 
+        rasterfile, roadLayer, antennaLayer = self.pickLayers()
         
         #If we didn't find the required layers, exit immediately.
         if rasterfile is None or roadLayer is None or antennaLayer is None:
@@ -376,18 +434,7 @@ class Hybriddekning:
         geotransform = raster.GetGeoTransform()
         rasterHeights = band.ReadAsArray(0, 0, raster.RasterXSize, raster.RasterYSize) # This is slow. Can we improve it?
 
-        start_point = QgsPoint(xmin, ymax)
-        end_point = QgsPoint(xmax, ymin)
-        startcella = self.findcell(start_point, geotransform)
-        sluttcella = self.findcell(end_point, geotransform)
-
-        antennas = Antenna.fromFeatures(antennaLayer.getFeatures())
-        validAntennas = []
-
-        for ant in antennas:
-            ant.qgisPoint = self.findcell(ant.point, geotransform)
-            if ant.qgisPoint[0] > startcella[0] and ant.qgisPoint[0] < sluttcella[0] and ant.qgisPoint[1] > startcella[1] and ant.qgisPoint[1] < sluttcella[1]:
-                validAntennas.append(ant)
+        validAntennas = self.findValidAntennas(antennaLayer, geotransform, xmin, xmax, ymin, ymax)
 
         #If no valid antennas remain, exit immediately.
         if len(validAntennas) <= 0:
