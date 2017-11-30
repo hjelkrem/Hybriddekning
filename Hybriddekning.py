@@ -1131,55 +1131,41 @@ class Hybriddekning:
         return distances,heights#,heights_skog
 
     def get_cells_Bresenham(self,startcelle,sluttcelle):
+        """Yield integer coordinates on the line from (x0, y0) to (x1, y1).
+        Input coordinates should be integers.
+        The result will contain both the start and the end point.
+        """
+
+        #Implementation fetched from: https://pypi.python.org/pypi/bresenham
 
         # Setup initial conditions
-        x1, y1 = startcelle
-        x2, y2 = sluttcelle
-        dx = x2 - x1
-        dy = y2 - y1
+        x0, y0 = startcelle
+        x1, y1 = sluttcelle
+        
+        dx = x1 - x0
+        dy = y1 - y0
 
+        xsign = 1 if dx > 0 else -1
+        ysign = 1 if dy > 0 else -1
 
-     
-        # Determine how steep the line is
-        is_steep = abs(dy) > abs(dx)
-     
-        # Rotate line
-        if is_steep:
-            x1, y1 = y1, x1
-            x2, y2 = y2, x2
-     
-        # Swap start and end points if necessary and store swap state
-        swapped = False
-        if x1 > x2:
-            x1, x2 = x2, x1
-            y1, y2 = y2, y1
-            swapped = True
-     
-        # Recalculate differentials
-        dx = x2 - x1
-        dy = y2 - y1
-     
-        # Calculate error
-        error = int(dx / 2.0)
-        ystep = 1 if y1 < y2 else -1
-     
-        # Iterate over bounding box generating points between start and end
-        y = y1
+        dx = abs(dx)
+        dy = abs(dy)
+
+        if dx > dy:
+            xx, xy, yx, yy = xsign, 0, 0, ysign
+        else:
+            dx, dy = dy, dx
+            xx, xy, yx, yy = 0, ysign, xsign, 0
+
+        D = 2*dy - dx
+        y = 0
+
         points = []
-        for x in range(x1, x2 + 1):
-            coord = (y, x) if is_steep else (x, y)
-            points.append(coord)
-            error -= abs(dy)
-            if error < 0:
-                y += ystep
-                error += dx
-     
-        # Reverse the list if the coordinates were swapped
-        if swapped:
-            points.reverse()
-        #fil=open(txtPath,'w')
-        #fil.write("Points: \n")
-        #fil.write(str(points)+"\n") 
-        #fil.close()
-        return points
+        for x in range(dx + 1):
+            points.append((x0 + x*xx + y*yx, y0 + x*xy + y*yy))
+            if D > 0:
+                y += 1
+                D -= dx
+            D += dy
       
+        return points
