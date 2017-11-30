@@ -42,11 +42,11 @@ class HybriddekningDialog(QtGui.QDialog, FORM_CLASS):
         # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
 
+    def listLayers(self):
+
         self.rasterLayers = []
         self.roadLayers = []
         self.antennaLayers = []
-
-    def listLayers(self):
 
         #Enumerate all layers and pick the layers to show the user
         for layer in iface.mapCanvas().layers():

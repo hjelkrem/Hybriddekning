@@ -23,7 +23,6 @@
 
 from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication, QDate, QSettings, QVariant,QFile, QFileInfo
 from PyQt4.QtGui import QAction, QIcon, QMessageBox, QDateEdit, QColor, QFileDialog, QButtonGroup, QProgressBar
-#from qgis.core import QgsDistanceArea, QgsCoordinateReferenceSystem, QgsPoint, QgsApplication
 # Initialize Qt resources from file resources.py
 import resources
 # Import the code for the dialog
@@ -37,10 +36,10 @@ import os.path
 from osgeo import osr, gdal, ogr
 from qgis.gui import QgsMessageBar
 from qgis.utils import iface
+from qgis.core import *
 import numpy as np
 import scipy.ndimage as ndimage
 import matplotlib.pyplot as plt
-from qgis.core import *
 import time
 from path_loss_diffraction import *
 import os
@@ -252,81 +251,38 @@ class Hybriddekning:
         self.dlg.txtDem.setText(filename)
 
     def printHeightProfile(self):
-        foundraster=False
-        foundantenna=False
-        layernim = iface.activeLayer().name()
-        checkednames=[]
-        checkedlayers=iface.mapCanvas().layers()
-        for checklayer in checkedlayers:
-            checkednames.append(checklayer.name())
-        for lyr in QgsMapLayerRegistry.instance().mapLayers().values():
-            if type(lyr) is QgsRasterLayer and lyr.name() in checkednames:
-                self.dprint("Using layer: {0} for terrain".format(lyr.name()))
-                rasterfile=lyr
-                rasterfilename=lyr.source()
-                rastercrs=lyr.crs()
-                foundraster=True
-            if type(lyr) is QgsVectorLayer and lyr.geometryType()==0 and lyr.name() in checkednames:
-                self.dprint("Using layer: {0} for antennas".format(lyr.name()))
-                antennaLayer=lyr
-                antennacrs=lyr.crs()
-                foundantenna=True
-        if foundantenna and foundraster:
-            ants=[]
-            iter = antennaLayer.getFeatures()
-            for feature in iter:
-                ants.append(feature.geometry().asPoint())
-            if len(ants)!=2:
-                self.dprint("Too many points! Select only two")
-            elif rastercrs!=antennacrs:
-                self.dprint("Projections not matching!")
-            else:
+        
+        rasterLayer = self.dlg.getSurfaceLayer()
+        #TODO: Use terrain layer too! (self.dlg.getTerrainLayer())
+        antennaLayer = self.dlg.getAntennaLayer()
 
-                raster = gdal.Open(rasterfilename)
-                cols = raster.RasterXSize
-                rows = raster.RasterYSize
-                bands = raster.RasterCount
-                band = raster.GetRasterBand(1)
-                geotransform = raster.GetGeoTransform()
-                bag_gtrn = geotransform
-                bag_proj = raster.GetProjectionRef()
-                bag_srs = osr.SpatialReference(bag_proj)
-                geo_srs =bag_srs.CloneGeogCS()                 # new srs obj to go from x,y -> φ,λ
-                transform = osr.CoordinateTransformation( bag_srs, geo_srs)
-                point1=(0,0)
-                point2=(0,1)
-                x1 = bag_gtrn[0] + bag_gtrn[1] * point1[0] + bag_gtrn[2] * point1[1]
-                y1 = bag_gtrn[3] + bag_gtrn[4] * point1[0] + bag_gtrn[5] * point1[1]
-                x2 = bag_gtrn[0] + bag_gtrn[1] * point2[0] + bag_gtrn[2] * point2[1]
-                y2 = bag_gtrn[3] + bag_gtrn[4] * point2[0] + bag_gtrn[5] * point2[1]           
-                point1 = transform.TransformPoint(x1, y1)[:2]
-                point2 = transform.TransformPoint(x2, y2)[:2]
-                firstpoint=QgsPoint(point1[0],point1[1])
-                secondpoint=QgsPoint(point2[0],point2[1])
-                #Create a measure object
-                distance = QgsDistanceArea()
-                crs = QgsCoordinateReferenceSystem()
-                crs.createFromSrsId(3452) # EPSG:4326
-                distance.setSourceCrs(crs)
-                distance.setEllipsoidalMode(True)
-                distance.setEllipsoid('WGS84')
-                cell_size_meters = int(round(distance.measureLine(firstpoint, secondpoint)))
-
-                filestring=[]
-                data = band.ReadAsArray(0, 0, cols, rows)
-                SRID=int(str(iface.activeLayer().crs().authid()).split(":")[1])
-                point=[self.findcell(ants[0],geotransform),ants[1]]
-                xdist,xheight=self.get_heights_along_x(point,geotransform,data,cell_size_meters)
-                ydist,yheight=self.get_heights_along_y(point,geotransform,data,cell_size_meters)
-                dist,height=self.combine_and_sort(xdist,xheight,ydist,yheight,filestring)
-                line = plt.figure()
-                #hi=np.array(height)+np.array(height_skog)
-                plt.plot(dist, height)
-                #plt.plot(dist,hi,color='green')
-                plt.show()
-
-        else:
+        if rasterLayer is None or antennaLayer is None:
             self.dprint("Not sufficient layers for calculations")
+            return
+
+        ants = [x.geometry().asPoint() for x in antennaLayer.getFeatures()]
+        if len(ants) != 2:
+            self.dprint("Too many points! Select only two.")
+            return
+
+        if rasterLayer.crs() != antennaLayer.crs():
+            self.dprint("Projections not matching!")
+            return
+
+        raster = RasterLayer(rasterLayer)
+        cell_size_meters = raster.findCellSizeInMeters()
+
+        filestring = []
+        
+        point = [self.findcell(ants[0], raster.geotransform), ants[1]]
+        xdist, xheight = self.get_heights_along_x(point, raster.geotransform, raster.data, cell_size_meters)
+        ydist, yheight = self.get_heights_along_y(point, raster.geotransform, raster.data, cell_size_meters)
+        dist, height = self.combine_and_sort(xdist, xheight, ydist, yheight, filestring)
+        line = plt.figure()
+        
+        plt.plot(dist, height)
+        
+        plt.show()
 
     def timeit(self, message, reset=False):
         
@@ -389,37 +345,7 @@ class Hybriddekning:
                 minSignal = result
                 foundSignal = True
 
-            return foundSignal, minSignal
-
-    def findCellSizeInMeters(self, raster):
-
-        bag_gtrn = raster.geotransform
-        bag_proj = raster.raster.GetProjectionRef()
-        bag_srs = osr.SpatialReference(bag_proj)
-        geo_srs =bag_srs.CloneGeogCS()                 # new srs obj to go from x,y -> φ,λ
-        transform = osr.CoordinateTransformation( bag_srs, geo_srs)
-
-        point1=(0,0)
-        point2=(0,1)
-
-        x1 = bag_gtrn[0] + bag_gtrn[1] * point1[0] + bag_gtrn[2] * point1[1]
-        y1 = bag_gtrn[3] + bag_gtrn[4] * point1[0] + bag_gtrn[5] * point1[1]
-        x2 = bag_gtrn[0] + bag_gtrn[1] * point2[0] + bag_gtrn[2] * point2[1]
-        y2 = bag_gtrn[3] + bag_gtrn[4] * point2[0] + bag_gtrn[5] * point2[1]  
-
-        point1 = transform.TransformPoint(x1, y1)[:2]
-        point2 = transform.TransformPoint(x2, y2)[:2]
-        firstpoint=QgsPoint(point1[0],point1[1])
-        secondpoint=QgsPoint(point2[0],point2[1])
-
-        #Create a measure object
-        distance = QgsDistanceArea()
-        crs = QgsCoordinateReferenceSystem()
-        crs.createFromSrsId(3452) # EPSG:4326
-        distance.setSourceCrs(crs)
-        distance.setEllipsoidalMode(True)
-        distance.setEllipsoid('WGS84')
-        return int(round(distance.measureLine(firstpoint, secondpoint)))
+        return foundSignal, minSignal
 
     def calculateSignal(self):
 
@@ -453,7 +379,7 @@ class Hybriddekning:
         terrain = RasterLayer(terrainLayer)
 
         #Find cell size in meters
-        cell_size_meters = self.findCellSizeInMeters(surface)
+        cell_size_meters = surface.findCellSizeInMeters()
 
         start_point = QgsPoint(xmin, ymax)
         end_point = QgsPoint(xmax, ymin)
