@@ -30,6 +30,7 @@ from Hybriddekning_dialog import HybriddekningDialog
 from antenna import Antenna
 from rasterLayer import RasterLayer
 from timing import Timing
+from roadPointList import RoadPointList
 import multiprocessing
 import threading
 import os.path
@@ -371,28 +372,7 @@ class Hybriddekning:
 
     def getRoadPoints(self, surface, roadLayer):
 
-        roadpoints = []
-
-        #Using a dictionary to store which coordinates have been added to the list.
-        #This gives a slight additional memory overhead, but a huge performance boost,
-        #as the dictionary checks are O(1).
-        roadDict = {}
-
-        def addRoadPoints(sx, sy, radius):
-            for x in range(sx - radius, sx + radius):
-                for y in range(sy - radius, sy + radius):
-
-                    #Check if this coordinate has been added before, and add it if not.
-                    isNew = False
-                    if x not in roadDict:
-                        roadDict[x] = { y: 1}
-                        isNew = True
-                    elif y not in roadDict[x]:
-                        roadDict[x][y] = 1
-                        isNew = True
-
-                    if isNew:
-                        roadpoints.append((x, y))
+        roadPoints = RoadPointList()
 
         for link in roadLayer.selectedFeatures():
 
@@ -400,13 +380,13 @@ class Hybriddekning:
             startcelle = self.findcell(QgsPoint(geom[0]), surface.geotransform)
 
             #Find the nearest points
-            addRoadPoints(startcelle[0], startcelle[1], 5)
+            roadPoint.addAround(startcelle[0], startcelle[1], 5)
 
             for i in range(1, len(geom)):
                 sluttcelle = self.findcell(QgsPoint(geom[i]), surface.geotransform)
                 cells = self.get_cells_Bresenham(startcelle, sluttcelle)
                 for cell in cells:
-                    addRoadPoints(cell[0], cell[1], 10)
+                    roadPoint.addAround(cell[0], cell[1], 10)
 
                 startcelle = sluttcelle
 
