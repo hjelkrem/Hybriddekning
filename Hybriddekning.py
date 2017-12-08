@@ -252,6 +252,8 @@ class Hybriddekning:
         self.dlg.txtDem.setText(filename)
 
     def checkCrs(self, layers):
+
+        #TODO: Don't compare the crs() directly. If it's a user defined CRS, the comparison will fail even though the CRS codes are the same. 
         for i, layer in enumerate(layers):
             if i < 1: continue
             if layer.crs() != layers[i-1].crs():
@@ -321,7 +323,6 @@ class Hybriddekning:
         for ant in antennas:
             ant.qgisPoint = self.findcell(ant.point, geotransform)
             self.timeit("Compared to: " + str(ant.qgisPoint[0]) + ", " + str(ant.qgisPoint[1]))
-            self.timeit("Compared to: " + str(ant.qgisPoint[0]) + ", " + str(ant.qgisPoint[1]))
             if ant.qgisPoint[0] > startcella[0] and ant.qgisPoint[0] < sluttcella[0] and ant.qgisPoint[1] > startcella[1] and ant.qgisPoint[1] < sluttcella[1]:
                 validAntennas.append(ant)
 
@@ -390,24 +391,26 @@ class Hybriddekning:
 
                 startcelle = sluttcelle
 
-        return roadpoints.list
+        return roadPoints.list
 
     def getRoadPointsForOptimize(self, surface, roadLayer):
 
-        roadPoint = RoadPointList()
+        roadPoints = RoadPointList()
 
         for link in roadLayer.selectedFeatures():
             
             geom = link.geometry().asPolyline()
             startcelle = self.findcell(QgsPoint(geom[0]), surface.geotransform)
 
-            roadpoints.add(startcelle[0], startcelle[1])
+            roadPoints.add(startcelle[0], startcelle[1])
 
             for i in range(1, len(geom)):
                 sluttcelle = self.findcell(QgsPoint(geom[i]), geotransform)
                 cells = self.get_cells_Bresenham(startcelle,sluttcelle)
                 roadPoints.addRange(cells)
                 startcelle = sluttcelle
+
+        return roadPoints.list
 
     def calculateSignal(self):
 
@@ -545,7 +548,7 @@ class Hybriddekning:
         dataset = driver.Create(tempfilename,100,100,1,gdal.GDT_Float32) 
         surface = RasterLayer(surfaceLayer)
         
-        sel_features = roadlayer.selectedFeatures()
+        sel_features = roadLayer.selectedFeatures()
         if len(sel_features) < 1:
             self.dprint("No roadlinks selected")            
             return

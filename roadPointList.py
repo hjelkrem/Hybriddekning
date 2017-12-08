@@ -3,7 +3,7 @@ from qgis.core import *
 
 class RoadPointList:
 
-    def __init__(self, layer):
+    def __init__(self):
         #Using a dictionary to store which coordinates have been added to the list.
         #This gives a slight additional memory overhead, but a huge performance boost,
         #as the dictionary checks are O(1).
@@ -19,7 +19,7 @@ class RoadPointList:
         for coord in list:
             self.add(coord[0], coord[1])
 
-    def add(self, sx, sy):
+    def add(self, x, y):
         #Check if this coordinate has been added before, and add it if not.
         isNew = False
         if x not in self.__contents:
