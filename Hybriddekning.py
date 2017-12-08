@@ -370,7 +370,7 @@ class Hybriddekning:
 
         return foundSignal, minSignal, outsideOfRaster, insideRaster
 
-    def getRoadPoints(self, surface, roadLayer):
+    def getRoadPoints(self, surface, roadLayer, radius):
 
         roadPoints = RoadPointList()
 
@@ -380,13 +380,13 @@ class Hybriddekning:
             startcelle = self.findcell(QgsPoint(geom[0]), surface.geotransform)
 
             #Find the nearest points
-            roadPoint.addAround(startcelle[0], startcelle[1], 5)
+            roadPoints.addAround(startcelle[0], startcelle[1], radius)
 
             for i in range(1, len(geom)):
                 sluttcelle = self.findcell(QgsPoint(geom[i]), surface.geotransform)
                 cells = self.get_cells_Bresenham(startcelle, sluttcelle)
                 for cell in cells:
-                    roadPoint.addAround(cell[0], cell[1], 10)
+                    roadPoints.addAround(cell[0], cell[1], radius)
 
                 startcelle = sluttcelle
 
@@ -459,7 +459,7 @@ class Hybriddekning:
 
         self.timeit("Init")
 
-        roadpoints = self.getRoadPoints(surface, roadLayer)
+        roadpoints = self.getRoadPoints(surface, roadLayer, 5)
         
         minx = min(roadpoints, key=lambda t: t[0])[0] - 1
         miny = min(roadpoints, key=lambda t: t[1])[1] - 1
@@ -558,7 +558,7 @@ class Hybriddekning:
         end_point = QgsPoint(xmax,ymin)
         sluttcella = self.findcell(end_point,geotransform)
 
-        roadpoints2 = self.getRoadPoints(surface, roadLayer) #TODO: first radius should be 10 in this case. Ask Odd!
+        roadpoints2 = self.getRoadPoints(surface, roadLayer, 10)
 
         minx=min(roadpoints2, key = lambda t: t[1])[0]-500
         miny=min(roadpoints2, key = lambda t: t[0])[1]-500
