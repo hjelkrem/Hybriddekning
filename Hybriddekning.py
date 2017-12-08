@@ -250,6 +250,17 @@ class Hybriddekning:
         filename = QFileDialog.getOpenFileName(self.dlg, "Select rasterfile to write to", "", "*.tif")
         self.dlg.txtDem.setText(filename)
 
+    def checkCrs(self, layers):
+        for i, layer in enumerate(layers):
+            if i < 1: continue
+            if layer.crs() != layers[i-1].crs():
+                s = "The projections of all the layers are not matching!"
+                for l in layers:
+                    s += "\n" + l.name() + ": " + str(l.crs().authid())
+                self.dprint(s)
+                return False
+        return True
+
     def printHeightProfile(self):
         
         rasterLayer = self.dlg.getSurfaceLayer()
@@ -265,8 +276,7 @@ class Hybriddekning:
             self.dprint("Too many points! Select only two.")
             return
 
-        if rasterLayer.crs() != antennaLayer.crs():
-            self.dprint("Projections not matching!")
+        if not self.checkCrs([rasterLayer, antennaLayer]):
             return
 
         raster = RasterLayer(rasterLayer)
@@ -407,6 +417,9 @@ class Hybriddekning:
             self.dprint("Please select at least one road link in the road layer.")
             return
 
+        if not self.checkCrs([surfaceLayer, terrainLayer, roadLayer, antennaLayer]):
+            return
+
         self.timeit("Starting new calculations ...", True)
 
         ext = iface.mapCanvas().extent()
@@ -493,6 +506,9 @@ class Hybriddekning:
         
         surfaceLayer = self.dlg.getSurfaceLayer()
         roadLayer = self.dlg.getRoadLayer()
+
+        if not self.checkCrs([surfaceLayer, roadLayer]):
+            return
 
         ext = iface.mapCanvas().extent()
         xmin = ext.xMinimum()
