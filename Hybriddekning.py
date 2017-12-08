@@ -531,21 +531,10 @@ class Hybriddekning:
         if not self.checkCrs([surfaceLayer, roadLayer]):
             return
 
-        ext = iface.mapCanvas().extent()
-        xmin = ext.xMinimum()
-        xmax = ext.xMaximum()
-        ymin = ext.yMinimum()
-        ymax = ext.yMaximum()
-        coords = "%f,%f,%f,%f" %(xmin, xmax, ymin, ymax)
-
         if surfaceLayer is None or roadLayer is None:
             self.dprint("Not sufficient layers for calculations")
             return
-
-        temp_path = os.environ['TEMP']
-        tempfilename=temp_path+'temp'
-        driver = gdal.GetDriverByName('GTiff')
-        dataset = driver.Create(tempfilename,100,100,1,gdal.GDT_Float32) 
+            
         surface = RasterLayer(surfaceLayer)
         
         sel_features = roadLayer.selectedFeatures()
@@ -554,12 +543,6 @@ class Hybriddekning:
             return
 
         roadpoints = self.getRoadPointsForOptimize(surface, roadLayer)
-
-        start_point = QgsPoint(xmin,ymax)
-        ident = rasterfile.dataProvider().identify(QgsPoint(xmin,ymax), QgsRaster.IdentifyFormatValue)
-        startcella = self.findcell(start_point,geotransform)
-        end_point = QgsPoint(xmax,ymin)
-        sluttcella = self.findcell(end_point,geotransform)
 
         roadpoints2 = self.getRoadPoints(surface, roadLayer, 10)
 
@@ -599,6 +582,10 @@ class Hybriddekning:
         resultarray = np.array(filearray)
         
         resultarray *= (100.0/resultarray.max())
+
+        temp_path = os.environ['TEMP']
+        tempfilename=temp_path+'temp'
+        driver = gdal.GetDriverByName('GTiff')
 
         writeFile=True if txtPath!=None else False
         txtPath = self.dlg.txtDem.toPlainText()
