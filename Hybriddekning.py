@@ -530,7 +530,7 @@ class Hybriddekning:
         if len(txtPath) > 0:
             tempfilename = txtPath
 
-        self.array2raster(tempfilename, cols, rows, surface.geotransform, resultarray, surface.srid(), miny, minx, cell_size_meters)
+        self.array2raster(tempfilename, cols, rows, surface.geotransform, resultarray, surface.srid(), miny, minx, cellSizeInMeters)
         
         layer = QgsRasterLayer(tempfilename, 'resultat')
         # Add the layer to the map (comment the following line if the loading in the Layers Panel is not needed)
@@ -596,11 +596,11 @@ class Hybriddekning:
         tempfilename=temp_path+'temp'
         driver = gdal.GetDriverByName('GTiff')
 
-        writeFile=True if txtPath!=None else False
         txtPath = self.dlg.txtDem.toPlainText()
+        writeFile=True if txtPath!=None else False
         if len(txtPath)>0:
             tempfilename=txtPath
-        self.array2raster(tempfilename, cols, rows, geotransform, resultarray, SRID, miny, minx)
+        self.array2raster(tempfilename, cols, rows, surface.geotransform, resultarray, surface.srid(), miny, minx, cellSizeInMeters)
         layer = QgsRasterLayer(tempfilename, 'resultat')
         uri = str(os.path.dirname(os.path.realpath(__file__)))+"\default_optimize.qml"
         layer.loadNamedStyle(uri)
