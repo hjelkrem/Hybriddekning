@@ -314,8 +314,13 @@ class Hybriddekning:
         antennas = Antenna.fromFeatures(antennaLayer.getFeatures())
         validAntennas = []
 
+        self.timeit("Antenna area start: " + str(startcella[0]) + ", " + str(startcella[1]))
+        self.timeit("Antenna area end: " + str(sluttcella[0]) + ", " + str(sluttcella[1]))
+
         for ant in antennas:
             ant.qgisPoint = self.findcell(ant.point, geotransform)
+            self.timeit("Compared to: " + str(ant.qgisPoint[0]) + ", " + str(ant.qgisPoint[1]))
+            self.timeit("Compared to: " + str(ant.qgisPoint[0]) + ", " + str(ant.qgisPoint[1]))
             if ant.qgisPoint[0] > startcella[0] and ant.qgisPoint[0] < sluttcella[0] and ant.qgisPoint[1] > startcella[1] and ant.qgisPoint[1] < sluttcella[1]:
                 validAntennas.append(ant)
 
