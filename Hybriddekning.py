@@ -390,7 +390,24 @@ class Hybriddekning:
 
                 startcelle = sluttcelle
 
-        return roadpoints
+        return roadpoints.list
+
+    def getRoadPointsForOptimize(self, surface, roadLayer):
+
+        roadPoint = RoadPointList()
+
+        for link in roadLayer.selectedFeatures():
+            
+            geom = link.geometry().asPolyline()
+            startcelle = self.findcell(QgsPoint(geom[0]), surface.geotransform)
+
+            roadpoints.add(startcelle[0], startcelle[1])
+
+            for i in range(1, len(geom)):
+                sluttcelle = self.findcell(QgsPoint(geom[i]), geotransform)
+                cells = self.get_cells_Bresenham(startcelle,sluttcelle)
+                roadPoints.addRange(cells)
+                startcelle = sluttcelle
 
     def calculateSignal(self):
 
@@ -533,54 +550,15 @@ class Hybriddekning:
             self.dprint("No roadlinks selected")            
             return
 
-        roadpoints=[]
-        for f in sel_features:
-            geom = f.geometry().asPolyline()
-            start_point = QgsPoint(geom[0])
-            startcelle=self.findcell(start_point,geotransform)
-            if startcelle not in roadpoints:
-                roadpoints.append(startcelle)
-            for i in range(1,len(geom)):
-                end_point = QgsPoint(geom[i])
-                sluttcelle=self.findcell(end_point,geotransform)
-                if sluttcelle!=startcelle:
-                    cell_array=self.get_cells_Bresenham(startcelle,sluttcelle)
-                    for cell in cell_array:
-                        if cell not in roadpoints:
-                            roadpoints.append(cell)
-                    startcelle=sluttcelle
-        start_point=QgsPoint(xmin,ymax)
+        roadpoints = self.getRoadPointsForOptimize(surface, roadLayer)
+
+        start_point = QgsPoint(xmin,ymax)
         ident = rasterfile.dataProvider().identify(QgsPoint(xmin,ymax), QgsRaster.IdentifyFormatValue)
-        startcella=self.findcell(start_point,geotransform)
-        end_point=QgsPoint(xmax,ymin)
-        sluttcella=self.findcell(end_point,geotransform)
-        sel_features = roadlayer.selectedFeatures()
-        roadpoints2=[]
-        width=10
-        for f in sel_features:
-            geom = f.geometry().asPolyline()
-            start_point = QgsPoint(geom[0])
-            startcelle=self.findcell(start_point,geotransform)
-            #Finn de nærmeste punkter:
-            for x in range(startcelle[0]-width,startcelle[0]+width):
-                for y in range(startcelle[1]-width,startcelle[1]+width):
-                    celle=(x,y)
-                    if celle not in roadpoints2:
-            #if startcelle not in roadpoints:
-                        roadpoints2.append(celle)
-            for i in range(1,len(geom)):
-                end_point = QgsPoint(geom[i])
-                sluttcelle=self.findcell(end_point,geotransform)
-                if sluttcelle!=startcelle:
-                    cell_array=self.get_cells_Bresenham(startcelle,sluttcelle)
-                    for cell in cell_array:
-                        for x in range(cell[0]-width,cell[0]+width):
-                            for y in range(cell[1]-width,cell[1]+width):
-                                celle=(x,y)
-                                if celle not in roadpoints2:                                
-                        #if cell not in roadpoints:
-                                    roadpoints2.append(celle)
-                    startcelle=sluttcelle
+        startcella = self.findcell(start_point,geotransform)
+        end_point = QgsPoint(xmax,ymin)
+        sluttcella = self.findcell(end_point,geotransform)
+
+        roadpoints2 = self.getRoadPoints(surface, roadLayer) #TODO: first radius should be 10 in this case. Ask Odd!
 
         minx=min(roadpoints2, key = lambda t: t[1])[0]-500
         miny=min(roadpoints2, key = lambda t: t[0])[1]-500
