@@ -393,7 +393,7 @@ class Hybriddekning:
 
         return roadPoints.list
 
-    def getRoadPointsForOptimize(self, surface, roadLayer):
+    def getCenterLinePoints(self, surface, roadLayer):
 
         roadPoints = RoadPointList()
 
@@ -542,24 +542,23 @@ class Hybriddekning:
             self.dprint("No roadlinks selected")            
             return
 
-        roadpoints = self.getRoadPointsForOptimize(surface, roadLayer)
+        centerLinePoints = self.getCenterLinePoints(surface, roadLayer)
+        roadpoints = self.getRoadPoints(surface, roadLayer, 10)
 
-        roadpoints2 = self.getRoadPoints(surface, roadLayer, 10)
-
-        minx=min(roadpoints2, key = lambda t: t[1])[0]-500
-        miny=min(roadpoints2, key = lambda t: t[0])[1]-500
-        maxx=max(roadpoints2, key = lambda t: t[1])[0]+500
-        maxy=max(roadpoints2, key = lambda t: t[0])[1]+500
+        minx=min(roadpoints, key = lambda t: t[1])[0]-500
+        miny=min(roadpoints, key = lambda t: t[0])[1]-500
+        maxx=max(roadpoints, key = lambda t: t[1])[0]+500
+        maxy=max(roadpoints, key = lambda t: t[0])[1]+500
         cols2=maxy-miny
         rows2=maxx-minx
         filearray = [ [0]*cols2 for _ in xrange(rows2) ]
         #filearray = [ [0]*cols for _ in xrange(rows) ]
         f=5900*1000000 #Conv from MHz to Hz
         ant_h=10
-        for roadpoint2 in roadpoints2:
+        for roadpoint2 in roadpoints:
             celle=roadpoint2
             signal=0
-            for roadpoint in roadpoints:
+            for roadpoint in centerLinePoints:
                 if celle != roadpoint:
                     points=self.get_cells_Bresenham(celle,roadpoint)
                     no_points=len(points)
