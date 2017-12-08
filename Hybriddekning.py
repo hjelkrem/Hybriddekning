@@ -271,9 +271,9 @@ class Hybriddekning:
             self.dprint("Not sufficient layers for calculations")
             return
 
-        ants = [x.geometry().asPoint() for x in antennaLayer.getFeatures()]
+        ants = [x.geometry().asPoint() for x in antennaLayer.selectedFeatures()]
         if len(ants) != 2:
-            self.dprint("Too many points! Select only two.")
+            self.dprint("Too " + ("many" if len(ants) > 2 else "few") + " points! This function needs 2, and you have selected " + str(len(ants)) + ".")
             return
 
         if not self.checkCrs([rasterLayer, antennaLayer]):
