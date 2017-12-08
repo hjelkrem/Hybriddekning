@@ -29,6 +29,7 @@ import resources
 from Hybriddekning_dialog import HybriddekningDialog
 from antenna import Antenna
 from rasterLayer import RasterLayer
+from rasterCounter import RasterCounter
 from timing import Timing
 from roadPointList import RoadPointList
 import multiprocessing
@@ -328,48 +329,74 @@ class Hybriddekning:
 
         return validAntennas
 
-    def calculateSignalAtPoint(self, cellSizeInMeters, surface, terrain, validAntennas, cell):
+    def calculateSignalBetweenPoints(self, terrain, surface, pointA, pointB, cellSizeInMeters, frequencyHz, height, rasterCounter):
+        
+        points = self.get_cells_Bresenham(pointA, pointB)
+
+        if len(points) <= 3: # Not enough points between the start and end points.
+            return False, 0
+
+        distance = cellSizeInMeters * np.hypot(pointA[0] - pointB[0], pointA[1] - pointB[1])
+        
+        count = len(points)
+        std_dist = distance / count * 0.001 # From meters to kilometers
+        heights = np.empty(count)
+        dists = np.empty(count)
+        accumulatedDist = 0.0
+
+        for i, point in enumerate(points):
+            
+            firstOrLastPoint = True if i < 1 or i >= len(points) - 1 else False
+            heightSource = terrain if firstOrLastPoint else surface
+            try:
+                h = heightSource.data[point[1]][point[0]]
+                rasterCounter.inside += 1
+            except:
+                h = 0
+                rasterCounter.outside += 1
+
+            heights[i] = h
+            dists[i] = accumulatedDist
+            accumulatedDist += std_dist
+
+        result = self.calculate_propagation_np(dists, heights, frequencyHz, height)
+
+        return result > 0, result
+
+    def calculateSignalBetweenRoadPoints(self, cellSizeInMeters, surface, terrain, roadPoint, otherPoints, rasterCounter):
+        
+        foundSignal = False
+        totalSignal = 0
+
+        frequencyHz = 5900 * 1000000 #Conv from MHz to Hz
+        height = 10
+
+        for otherPoint in otherPoints:
+            if roadPoint == otherPoint:
+                continue
+
+            valid, result = self.calculateSignalBetweenPoints(terrain, surface, roadPoint, otherPoint, cellSizeInMeters, frequencyHz, height, rasterCounter)
+
+            if valid:
+                totalSignal += result
+                foundSignal = True
+
+        return foundSignal, totalSignal
+
+    def calculateSignalFromAntennaToPoint(self, cellSizeInMeters, surface, terrain, roadPoint, validAntennas, rasterCounter):
 
         foundSignal = False
         minSignal = 999999
-        outsideOfRaster = 0
-        insideRaster = 0
 
         for ant in validAntennas:
 
-            points = self.get_cells_Bresenham(cell, ant.qgisPoint)
+            valid, result = self.calculateSignalBetweenPoints(terrain, surface, roadPoint, ant.qgisPoint, cellSizeInMeters, ant.frequencyHz, ant.height, rasterCounter)
 
-            if len(points) <= 3: # Not enough points between the start and end points.
-                continue
-
-            length = cellSizeInMeters * np.hypot(cell[0] - ant.qgisPoint[0], cell[1] - ant.qgisPoint[1])
-            count = len(points)
-            std_dist = length / count * 0.001
-            heights = np.empty(count)
-            dists = np.empty(count)
-            accumulatedDist = 0.0
-
-            for i, point in enumerate(points):
-                
-                firstOrLastPoint = True if i < 1 or i >= len(points) - 1 else False
-                heightSource = terrain if firstOrLastPoint else surface
-                try:
-                    height = heightSource.data[point[1]][point[0]]
-                    insideRaster += 1
-                except:
-                    height = 0
-                    outsideOfRaster += 1
-
-                heights[i] = height
-                dists[i] = accumulatedDist
-                accumulatedDist += std_dist
-
-            result = self.calculate_propagation_np(dists, heights, ant.frequencyHz, ant.height)
-            if result > 0 and result < minSignal:
+            if valid and result < minSignal:
                 minSignal = result
                 foundSignal = True
 
-        return foundSignal, minSignal, outsideOfRaster, insideRaster
+        return foundSignal, minSignal
 
     def getRoadPoints(self, surface, roadLayer, radius):
 
@@ -405,7 +432,7 @@ class Hybriddekning:
             roadPoints.add(startcelle[0], startcelle[1])
 
             for i in range(1, len(geom)):
-                sluttcelle = self.findcell(QgsPoint(geom[i]), geotransform)
+                sluttcelle = self.findcell(QgsPoint(geom[i]), surface.geotransform)
                 cells = self.get_cells_Bresenham(startcelle,sluttcelle)
                 roadPoints.addRange(cells)
                 startcelle = sluttcelle
@@ -446,7 +473,7 @@ class Hybriddekning:
         terrain = RasterLayer(terrainLayer)
 
         #Find cell size in meters
-        cell_size_meters = surface.findCellSizeInMeters()
+        cellSizeInMeters = surface.findCellSizeInMeters()
 
         start_point = QgsPoint(xmin, ymax)
         end_point = QgsPoint(xmax, ymin)
@@ -474,15 +501,11 @@ class Hybriddekning:
 
         self.timeit("Roadlink setup")
 
-        outsideOfRaster = 0
-        insideRaster = 0
+        rasterCounter = RasterCounter()
 
         for roadpoint in roadpoints:
         
-            foundSignal, value, outside, inside = self.calculateSignalAtPoint(cell_size_meters, surface, terrain, validAntennas, roadpoint)
-
-            outsideOfRaster += outside
-            insideRaster += inside
+            foundSignal, value = self.calculateSignalFromAntennaToPoint(cellSizeInMeters, surface, terrain, roadpoint, validAntennas, rasterCounter)
 
             if foundSignal:
                 filearray[int(roadpoint[1] - miny)][int(roadpoint[0] - minx)] = value
@@ -490,7 +513,7 @@ class Hybriddekning:
         # Multi threading is deactivated. The entire class needs to be restructured for this to be feasible.
         # A working mt approach is stored in asyncSignalCalculator.py, and can be used as follows (but it needs that rectructuring first!)
         #QgsMessageLog.logMessage("Threads: " + str(multiprocessing.cpu_count()), "Debug", 0)
-        #calc = AsyncSignalCalculator(self, cell_size_meters, filearray, rasterHeights, validAntennas, minx, miny, roadpoints, 1)
+        #calc = AsyncSignalCalculator(self, cellSizeInMeters, filearray, rasterHeights, validAntennas, minx, miny, roadpoints, 1)
         #calc.run()
 
         self.timeit("Calculations")
@@ -501,7 +524,7 @@ class Hybriddekning:
         tempfilename=temp_path+'temp'
         driver = gdal.GetDriverByName('GTiff')
         
-        dataset = driver.Create(tempfilename,cols,rows,1,gdal.GDT_Float32)   
+        dataset = driver.Create(tempfilename,cols,rows,1,gdal.GDT_Float32)
 
         txtPath = self.dlg.txtDem.toPlainText()
         if len(txtPath) > 0:
@@ -518,68 +541,55 @@ class Hybriddekning:
 
         self.timeit("Done")
 
-        if outsideOfRaster > 0:
-            self.dprint("Calculations complete with warnings: " + str(outsideOfRaster) + " of the " + str(outsideOfRaster + insideRaster) + " calculation points were outside of the raster area! Maybe the projections are wrong?")
+        if rasterCounter.hasOutsiders():
+            self.dprint("Calculations complete with warnings: " + str(rasterCounter.outside) + " of the " + str(rasterCounter.sum()) + " calculation points were outside of the raster area! Maybe the projections are wrong?")
         else:
             self.dprint("Calculations complete.")
 
     def optimize(self):
         
         surfaceLayer = self.dlg.getSurfaceLayer()
+        terrainLayer = self.dlg.getTerrainLayer()
         roadLayer = self.dlg.getRoadLayer()
 
-        if not self.checkCrs([surfaceLayer, roadLayer]):
+        if not self.checkCrs([surfaceLayer, terrainLayer, roadLayer]):
             return
 
-        if surfaceLayer is None or roadLayer is None:
+        if surfaceLayer is None or roadLayer is None or terrainLayer is None:
             self.dprint("Not sufficient layers for calculations")
             return
-            
+
         surface = RasterLayer(surfaceLayer)
+        terrain = RasterLayer(terrainLayer)
+
+        #Find cell size in meters
+        cellSizeInMeters = surface.findCellSizeInMeters()
         
-        sel_features = roadLayer.selectedFeatures()
-        if len(sel_features) < 1:
+        if len(roadLayer.selectedFeatures()) < 1:
             self.dprint("No roadlinks selected")            
             return
 
         centerLinePoints = self.getCenterLinePoints(surface, roadLayer)
         roadpoints = self.getRoadPoints(surface, roadLayer, 10)
 
-        minx=min(roadpoints, key = lambda t: t[1])[0]-500
-        miny=min(roadpoints, key = lambda t: t[0])[1]-500
-        maxx=max(roadpoints, key = lambda t: t[1])[0]+500
-        maxy=max(roadpoints, key = lambda t: t[0])[1]+500
-        cols2=maxy-miny
-        rows2=maxx-minx
-        filearray = [ [0]*cols2 for _ in xrange(rows2) ]
-        #filearray = [ [0]*cols for _ in xrange(rows) ]
-        f=5900*1000000 #Conv from MHz to Hz
-        ant_h=10
-        for roadpoint2 in roadpoints:
-            celle=roadpoint2
-            signal=0
-            for roadpoint in centerLinePoints:
-                if celle != roadpoint:
-                    points=self.get_cells_Bresenham(celle,roadpoint)
-                    no_points=len(points)
-                    length=np.sqrt((celle[0]-roadpoint[0])**2 + (celle[1]-roadpoint[1])**2)
-                    std_dist=length/no_points
-                    heights=[]
-                    dists=[]
-                    dist=0.0
-                    for point in points:
-                        height=data[point[1]][point[0]]
-                        heights.append(height)
-                        dists.append(dist)
-                        dist+=std_dist
-                    if len(dists)>2 and len(heights)>2:
-                        #self.dprint(str(heights))
-                        calc_signal=self.calculate_propagation(dists,heights,f,ant_h)
-                        if calc_signal>0:
-                            signal+=calc_signal
-            filearray[int(celle[1]-miny)][int(celle[0]-minx)]=signal
-        resultarray = np.array(filearray)
+        minx = min(roadpoints, key=lambda t: t[0])[0] - 1
+        miny = min(roadpoints, key=lambda t: t[1])[1] - 1
+        maxx = max(roadpoints, key=lambda t: t[0])[0] + 1
+        maxy = max(roadpoints, key=lambda t: t[1])[1] + 1
+        rows = maxy - miny
+        cols = maxx - minx
+        filearray = [ [0]*cols for _ in xrange(rows) ]
         
+        rasterCounter = RasterCounter()
+
+        for roadpoint in roadpoints:
+        
+            foundSignal, value = self.calculateSignalBetweenRoadPoints(cellSizeInMeters, surface, terrain, roadpoint, centerLinePoints, rasterCounter)
+
+            if foundSignal:
+                filearray[int(roadpoint[1] - miny)][int(roadpoint[0] - minx)] = value
+
+        resultarray = np.array(filearray)
         resultarray *= (100.0/resultarray.max())
 
         temp_path = os.environ['TEMP']
@@ -590,7 +600,7 @@ class Hybriddekning:
         txtPath = self.dlg.txtDem.toPlainText()
         if len(txtPath)>0:
             tempfilename=txtPath
-        self.array2raster(tempfilename,cols2,rows2,geotransform,resultarray,SRID,miny,minx)
+        self.array2raster(tempfilename, cols, rows, geotransform, resultarray, SRID, miny, minx)
         layer = QgsRasterLayer(tempfilename, 'resultat')
         uri = str(os.path.dirname(os.path.realpath(__file__)))+"\default_optimize.qml"
         layer.loadNamedStyle(uri)
@@ -601,7 +611,11 @@ class Hybriddekning:
         #iface.legendInterface().refreshLayerSymbology(layer)
         #self.dprint(uri)
         #iface.messageBar().clearWidgets() 
-        self.dprint("Calculations complete")
+        
+        if rasterCounter.hasOutsiders():
+            self.dprint("Calculations complete with warnings: " + str(rasterCounter.outside) + " of the " + str(rasterCounter.sum()) + " calculation points were outside of the raster area! Maybe the projections are wrong?")
+        else:
+            self.dprint("Calculations complete.")
 
     
     def run(self):
