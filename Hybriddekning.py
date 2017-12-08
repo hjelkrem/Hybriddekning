@@ -325,6 +325,8 @@ class Hybriddekning:
 
         foundSignal = False
         minSignal = 999999
+        outsideOfRaster = 0
+        insideRaster = 0
 
         for ant in validAntennas:
 
@@ -344,7 +346,12 @@ class Hybriddekning:
                 
                 firstOrLastPoint = True if i < 1 or i >= len(points) - 1 else False
                 heightSource = terrain if firstOrLastPoint else surface
-                height = heightSource.data[point[1]][point[0]]
+                try:
+                    height = heightSource.data[point[1]][point[0]]
+                    insideRaster += 1
+                except:
+                    height = 0
+                    outsideOfRaster += 1
 
                 heights[i] = height
                 dists[i] = accumulatedDist
@@ -355,7 +362,7 @@ class Hybriddekning:
                 minSignal = result
                 foundSignal = True
 
-        return foundSignal, minSignal
+        return foundSignal, minSignal, outsideOfRaster, insideRaster
 
     def getRoadPoints(self, surface, roadLayer):
 
@@ -462,9 +469,15 @@ class Hybriddekning:
 
         self.timeit("Roadlink setup")
 
+        outsideOfRaster = 0
+        insideRaster = 0
+
         for roadpoint in roadpoints:
         
-            foundSignal, value = self.calculateSignalAtPoint(cell_size_meters, surface, terrain, validAntennas, roadpoint)
+            foundSignal, value, outside, inside = self.calculateSignalAtPoint(cell_size_meters, surface, terrain, validAntennas, roadpoint)
+
+            outsideOfRaster += outside
+            insideRaster += inside
 
             if foundSignal:
                 filearray[int(roadpoint[1] - miny)][int(roadpoint[0] - minx)] = value
@@ -500,7 +513,10 @@ class Hybriddekning:
 
         self.timeit("Done")
 
-        self.dprint("Calculations complete")
+        if outsideOfRaster > 0:
+            self.dprint("Calculations complete with warnings: " + str(outsideOfRaster) + " of the " + str(outsideOfRaster + insideRaster) + " calculation points were outside of the raster area! Maybe the projections are wrong?")
+        else:
+            self.dprint("Calculations complete.")
 
     def optimize(self):
         
