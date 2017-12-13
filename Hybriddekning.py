@@ -474,6 +474,7 @@ class Hybriddekning:
 
         #Find cell size in meters
         cellSizeInMeters = surface.findCellSizeInMeters()
+        self.timeit("Cell size: " + str(cellSizeInMeters))
 
         start_point = QgsPoint(xmin, ymax)
         end_point = QgsPoint(xmax, ymin)
@@ -564,6 +565,7 @@ class Hybriddekning:
 
         #Find cell size in meters
         cellSizeInMeters = surface.findCellSizeInMeters()
+        self.timeit("Cell size: " + str(cellSizeInMeters))
         
         if len(roadLayer.selectedFeatures()) < 1:
             self.dprint("No roadlinks selected")            
